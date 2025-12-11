@@ -16,6 +16,20 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 })
 
+// --- HELPER: Date Formatter (Day, Month DD, YYYY) ---
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  // We use 'UTC' logic or simple string splitting to prevent timezone shifts
+  // But standard toLocaleDateString usually works fine for display
+  return date.toLocaleDateString('en-US', { 
+    weekday: 'long', // "Sunday"
+    year: 'numeric', // "2025"
+    month: 'short',  // "Dec"
+    day: 'numeric'   // "11"
+  })
+}
+
 const getCurrentMonthYear = () => {
   const now = new Date()
   return { month: now.getMonth() + 1, year: now.getFullYear() }
@@ -412,7 +426,7 @@ function Dashboard({ session }: { session: any }) {
         {lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No lessons yet.</p> : lessons.map((l) => (
           <div key={l.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-200 ${editingId === l.id ? 'ring-2 ring-orange-400' : ''}`}>
             <div className="flex justify-between items-start mb-3">
-              <div><div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-bold text-lg text-slate-800">{l.student_name}</span><span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md border font-medium">{l.subject}</span>{l.class_serial && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}</div><div className="text-xs text-slate-400">{l.batch}</div></div><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{l.lesson_date}</span>
+              <div><div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-bold text-lg text-slate-800">{l.student_name}</span><span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md border font-medium">{l.subject}</span>{l.class_serial && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}</div><div className="text-xs text-slate-400">{l.batch}</div></div><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{formatDate(l.lesson_date)}</span>
             </div>
             <p className="text-slate-700 text-sm mb-4 whitespace-pre-wrap leading-relaxed">{l.lesson_topic}</p>
             <div className="flex gap-3 border-t pt-3 mt-2"><button onClick={() => handleEdit(l)} className="flex-1 py-2 text-xs font-bold text-orange-600 bg-orange-50 rounded hover:bg-orange-100">Edit</button><button onClick={() => handleDelete(l.id)} className="flex-1 py-2 text-xs font-bold text-red-600 bg-red-50 rounded hover:bg-red-100">Delete</button></div>
@@ -616,7 +630,7 @@ function StudentsManager({ session }: { session: any }) {
   )
 }
 
-// --- REPORTS (UPDATED FOR MULTI-SUBJECT) ---
+// --- REPORTS (UPDATED FOR MULTI-SUBJECT & Date Format) ---
 function ReportsView({ session }: { session: any }) {
   const [filterType, setFilterType] = useState('student'); const [filterValue, setFilterValue] = useState(''); const [lessons, setLessons] = useState<any[]>([]); const [options, setOptions] = useState<string[]>([]);
   
@@ -654,6 +668,6 @@ function ReportsView({ session }: { session: any }) {
 
   return (
     <div className="space-y-6"><div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200"><label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Filter By</label><div className="flex bg-slate-100 rounded-lg p-1 mb-4 overflow-x-auto">{['student', 'batch', 'subject'].map(t => <button key={t} onClick={() => setFilterType(t)} className={`flex-1 px-3 py-2 rounded-md text-sm font-bold capitalize whitespace-nowrap ${filterType === t ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>{t}</button>)}</div><label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Select {filterType}</label><select className="w-full p-3 border rounded-lg text-base text-slate-800 bg-white" value={filterValue} onChange={e => setFilterValue(e.target.value)}><option value="">-- Select --</option>{options.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-      {filterValue && (<div className="space-y-4"><div className="flex justify-between items-center px-2"><h2 className="font-bold text-slate-700">Results: "{filterValue}"</h2><span className="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full">{lessons.length}</span></div>{lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No records.</p> : lessons.map(l => (<div key={l.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{l.lesson_date}</span>{l.class_serial && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-md border border-blue-200 font-bold">Class #{l.class_serial}</span>}</div><div className="font-bold text-slate-800 mb-2">{l.lesson_topic}</div><div className="text-xs text-slate-500 flex gap-2">{filterType !== 'student' && <span className="bg-slate-100 px-2 py-1 rounded">👤 {l.student_name}</span>}{filterType !== 'batch' && <span className="bg-slate-100 px-2 py-1 rounded">🎓 {l.batch}</span>}{filterType !== 'subject' && <span className="bg-slate-100 px-2 py-1 rounded">📚 {l.subject}</span>}</div></div>))}</div>)}</div>
+      {filterValue && (<div className="space-y-4"><div className="flex justify-between items-center px-2"><h2 className="font-bold text-slate-700">Results: "{filterValue}"</h2><span className="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full">{lessons.length}</span></div>{lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No records.</p> : lessons.map(l => (<div key={l.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{formatDate(l.lesson_date)}</span>{l.class_serial && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-md border border-blue-200 font-bold">Class #{l.class_serial}</span>}</div><div className="font-bold text-slate-800 mb-2">{l.lesson_topic}</div><div className="text-xs text-slate-500 flex gap-2">{filterType !== 'student' && <span className="bg-slate-100 px-2 py-1 rounded">👤 {l.student_name}</span>}{filterType !== 'batch' && <span className="bg-slate-100 px-2 py-1 rounded">🎓 {l.batch}</span>}{filterType !== 'subject' && <span className="bg-slate-100 px-2 py-1 rounded">📚 {l.subject}</span>}</div></div>))}</div>)}</div>
   )
 }
