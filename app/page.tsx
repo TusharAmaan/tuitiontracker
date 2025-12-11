@@ -16,8 +16,10 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 })
 
+// Helper to get current month and year for payments
 const getCurrentMonthYear = () => {
   const now = new Date()
+  // Month is 0-indexed in JS, so we add 1 for readable 1-12 format
   return { month: now.getMonth() + 1, year: now.getFullYear() }
 }
 
@@ -92,7 +94,7 @@ function LoginScreen() {
   )
 }
 
-// --- PROFILE MODAL (UPDATED TO NOTIFY PARENT) ---
+// --- PROFILE MODAL ---
 function ProfileModal({ session, onClose, onUpdate }: any) {
   const [loading, setLoading] = useState(false)
   const [fullName, setFullName] = useState('')
@@ -143,7 +145,7 @@ function ProfileModal({ session, onClose, onUpdate }: any) {
     if (error) {
         alert('Error saving profile: ' + error.message)
     } else {
-        onUpdate() // Refresh the parent name
+        onUpdate()
         onClose()
     }
     setLoading(false)
@@ -193,27 +195,20 @@ function ProfileModal({ session, onClose, onUpdate }: any) {
   )
 }
 
-// --- APP SHELL (UPDATED TO FETCH NAME) ---
+// --- APP SHELL ---
 function AppShell({ session }: { session: any }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [showProfile, setShowProfile] = useState(false)
-  const [profileName, setProfileName] = useState('Profile') // Default to 'Profile'
+  const [profileName, setProfileName] = useState('Profile')
   const [avatar, setAvatar] = useState('')
 
-  // Fetch profile name on load
   const fetchProfileName = async () => {
     const { data } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', session.user.id).single()
-    if (data?.full_name) {
-      setProfileName(data.full_name)
-    }
-    if (data?.avatar_url) {
-      setAvatar(data.avatar_url)
-    }
+    if (data?.full_name) { setProfileName(data.full_name) }
+    if (data?.avatar_url) { setAvatar(data.avatar_url) }
   }
 
-  useEffect(() => {
-    fetchProfileName()
-  }, [session])
+  useEffect(() => { fetchProfileName() }, [session])
 
   return (
     <main className="min-h-screen bg-slate-100 pb-20 md:pb-0 relative">
@@ -222,33 +217,21 @@ function AppShell({ session }: { session: any }) {
           <h1 className="text-lg md:text-xl font-extrabold text-slate-800">TuitionTracker</h1>
           
           <div className="flex gap-4 items-center">
-            {/* PROFILE BUTTON - SHOWS NAME NOW */}
             <button onClick={() => setShowProfile(true)} className="text-xs md:text-sm font-bold text-slate-600 hover:text-blue-600 flex items-center gap-2">
-              {avatar ? (
-                 <img src={avatar} alt="User" className="w-6 h-6 rounded-full object-cover border border-slate-200" />
-              ) : (
-                 <span>👤</span> 
-              )}
+              {avatar ? ( <img src={avatar} alt="User" className="w-6 h-6 rounded-full object-cover border border-slate-200" /> ) : ( <span>👤</span> )}
               <span className="hidden md:inline max-w-[100px] truncate">{profileName}</span>
             </button>
-            
-            <button onClick={() => supabase.auth.signOut()} className="text-xs md:text-sm text-red-500 font-bold hover:text-red-700 border border-red-100 bg-red-50 px-3 py-1.5 rounded-full transition">
-              Sign Out
-            </button>
+            <button onClick={() => supabase.auth.signOut()} className="text-xs md:text-sm text-red-500 font-bold hover:text-red-700 border border-red-100 bg-red-50 px-3 py-1.5 rounded-full transition">Sign Out</button>
           </div>
         </div>
         
         <div className="max-w-6xl mx-auto flex gap-2 mt-3 overflow-x-auto pb-1 no-scrollbar">
            {['dashboard', 'students', 'reports'].map(tab => (
-             <button key={tab} onClick={() => setActiveTab(tab)} 
-               className={`flex-1 md:flex-none text-center px-4 py-2 rounded-lg text-sm font-bold capitalize whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
-               {tab}
-             </button>
+             <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 md:flex-none text-center px-4 py-2 rounded-lg text-sm font-bold capitalize whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>{tab}</button>
            ))}
         </div>
       </nav>
 
-      {/* RENDER PROFILE MODAL */}
       {showProfile && <ProfileModal session={session} onClose={() => setShowProfile(false)} onUpdate={fetchProfileName} />}
 
       <div className="max-w-6xl mx-auto p-4 md:p-8">
@@ -260,6 +243,7 @@ function AppShell({ session }: { session: any }) {
   )
 }
 
+// --- PAYMENT MODAL ---
 function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel }: any) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -277,6 +261,7 @@ function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel 
   )
 }
 
+// --- DASHBOARD ---
 function Dashboard({ session }: { session: any }) {
   const [lessons, setLessons] = useState<any[]>([])
   const [students, setStudents] = useState<any[]>([])
@@ -423,12 +408,36 @@ function Dashboard({ session }: { session: any }) {
   )
 }
 
+// --- STUDENTS MANAGER (UPDATED WITH PAYMENT STATUS) ---
 function StudentsManager({ session }: { session: any }) {
   const [students, setStudents] = useState<any[]>([])
   const [form, setForm] = useState({ name: '', batch: '', subject: '', target: '' })
   const [editingId, setEditingId] = useState<number | null>(null)
-  const fetchStudents = async () => { const { data } = await supabase.from('students').select('*').eq('user_id', session.user.id).order('id', { ascending: false }); if(data) setStudents(data); }
+
+  // UPDATED fetchStudents to include payment status lookup
+  const fetchStudents = async () => {
+    const { month, year } = getCurrentMonthYear()
+
+    // 1. Get Students
+    const { data: sData, error: sError } = await supabase.from('students').select('*').eq('user_id', session.user.id).order('id', { ascending: false })
+    if (sError || !sData) { console.error(sError); return }
+
+    // 2. Get Payments for THIS month
+    const { data: pData, error: pError } = await supabase.from('payments').select('student_id, status').eq('user_id', session.user.id).eq('payment_month', month).eq('payment_year', year)
+    if (pError) { console.error(pError); return }
+
+    // 3. Merge data in JS
+    const combinedData = sData.map(student => {
+        const paymentRecord = pData.find(p => p.student_id === student.id)
+        // Attach a new property 'payment_status' to the student object
+        return { ...student, payment_status: paymentRecord ? paymentRecord.status : null }
+    })
+
+    setStudents(combinedData)
+  }
+
   useEffect(() => { fetchStudents() }, [])
+
   const handleEdit = (s: any) => { setEditingId(s.id); setForm({ name: s.name, batch: s.batch, subject: s.subject, target: s.target_classes }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   const handleCancel = () => { setEditingId(null); setForm({ name: '', batch: '', subject: '', target: '' }); }
   const handleSave = async (e: React.FormEvent) => { e.preventDefault(); const payload = { user_id: session.user.id, name: form.name, batch: form.batch, subject: form.subject, target_classes: parseInt(form.target) || 0 }; let error; if (editingId) { const { error: err } = await supabase.from('students').update(payload).eq('id', editingId); error = err } else { const { error: err } = await supabase.from('students').insert([payload]); error = err }; if(!error) { handleCancel(); fetchStudents(); } else { alert(error.message) } }
@@ -436,7 +445,7 @@ function StudentsManager({ session }: { session: any }) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit md:sticky md:top-24 z-10">
+      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit md:sticky md:top-2/4 z-10">
         <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Student' : 'Add Student'}</h2>{editingId && <button onClick={handleCancel} className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded font-bold">Cancel</button>}</div>
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           <input type="text" placeholder="Name" required className="p-3 border rounded-lg text-base text-slate-800" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
@@ -448,7 +457,18 @@ function StudentsManager({ session }: { session: any }) {
       </div>
       <div className="md:col-span-2 space-y-4"><h2 className="font-bold text-slate-700 px-2">Your Students</h2>{students.map(s => (
           <div key={s.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-3 ${editingId === s.id ? 'ring-2 ring-orange-400' : ''}`}>
-            <div className="flex justify-between items-start"><div><h3 className="font-bold text-slate-800 text-lg">{s.name}</h3><p className="text-sm text-slate-500 mt-1">{s.subject} • {s.batch}</p></div><span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold">Target: {s.target_classes}</span></div>
+            <div className="flex justify-between items-start">
+                <div>
+                    {/* NAME & PAYMENT STATUS BADGE */}
+                    <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-bold text-slate-800 text-lg">{s.name}</h3>
+                        {s.payment_status === 'paid' && <span className="text-xs font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-200">Paid</span>}
+                        {s.payment_status === 'due' && <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full border border-red-200 animate-pulse">Due</span>}
+                    </div>
+                    <p className="text-sm text-slate-500 mt-1">{s.subject} • {s.batch}</p>
+                </div>
+                <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold">Target: {s.target_classes}</span>
+            </div>
             <div className="flex gap-3 border-t pt-3"><button onClick={() => handleEdit(s)} className="flex-1 py-2 text-xs font-bold text-orange-600 bg-orange-50 rounded hover:bg-orange-100">Edit</button><button onClick={() => handleDelete(s.id)} className="flex-1 py-2 text-xs font-bold text-red-600 bg-red-50 rounded hover:bg-red-100">Delete</button></div>
           </div>
         ))}{students.length === 0 && <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No students yet.</p>}</div>
@@ -456,6 +476,7 @@ function StudentsManager({ session }: { session: any }) {
   )
 }
 
+// --- REPORTS ---
 function ReportsView({ session }: { session: any }) {
   const [filterType, setFilterType] = useState('student'); const [filterValue, setFilterValue] = useState(''); const [lessons, setLessons] = useState<any[]>([]); const [options, setOptions] = useState<string[]>([]);
   useEffect(() => { const load = async () => { const { data } = await supabase.from('students').select('*').eq('user_id', session.user.id); if (data) { const unique = Array.from(new Set(data.map((item: any) => filterType === 'student' ? item.name : filterType === 'batch' ? item.batch : item.subject))).filter(Boolean) as string[]; setOptions(unique); setFilterValue(''); setLessons([]); } }; load(); }, [filterType])
