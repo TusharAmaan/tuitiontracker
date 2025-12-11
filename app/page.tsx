@@ -33,6 +33,12 @@ const getCurrentMonthYear = () => {
   return { month: now.getMonth() + 1, year: now.getFullYear() }
 }
 
+const getMonthName = (monthNum: number) => {
+  const date = new Date()
+  date.setMonth(monthNum - 1)
+  return date.toLocaleString('default', { month: 'long' })
+}
+
 // --- MAIN CONTAINER ---
 export default function Home() {
   const [session, setSession] = useState<any>(null)
@@ -220,10 +226,9 @@ function AppShell({ session }: { session: any }) {
 
   useEffect(() => { fetchProfileName() }, [session])
 
-  // FIX: Force Sign Out
   const handleSignOut = async () => {
     await supabase.auth.signOut()
-    window.location.reload() // Force reload to clear state and show login
+    window.location.reload()
   }
 
   return (
@@ -242,7 +247,7 @@ function AppShell({ session }: { session: any }) {
         </div>
         
         <div className="max-w-6xl mx-auto flex gap-2 mt-3 overflow-x-auto pb-1 no-scrollbar">
-           {['dashboard', 'students', 'reports'].map(tab => (
+           {['dashboard', 'students', 'payments', 'reports'].map(tab => (
              <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 md:flex-none text-center px-4 py-2 rounded-lg text-sm font-bold capitalize whitespace-nowrap transition-colors ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>{tab}</button>
            ))}
         </div>
@@ -253,13 +258,142 @@ function AppShell({ session }: { session: any }) {
       <div className="max-w-6xl mx-auto p-4 md:p-8">
         {activeTab === 'dashboard' && <Dashboard session={session} />}
         {activeTab === 'students' && <StudentsManager session={session} />}
+        {activeTab === 'payments' && <PaymentsView session={session} />}
         {activeTab === 'reports' && <ReportsView session={session} />}
       </div>
     </main>
   )
 }
 
-// --- PAYMENT MODAL (FIXED CLOSE) ---
+// --- PAYMENTS VIEW (NEW) ---
+function PaymentsView({ session }: { session: any }) {
+  const [payments, setPayments] = useState<any[]>([])
+  const [filter, setFilter] = useState('this_month') // this_month, last_3, this_year, all
+  const [stats, setStats] = useState({ paid: 0, due: 0, rate: 0 })
+
+  useEffect(() => {
+    const fetchPayments = async () => {
+      // 1. Fetch all payments (we filter in JS for flexibility)
+      // We also need student names, so we select nested data
+      const { data, error } = await supabase
+        .from('payments')
+        .select('*, students(name, batch)')
+        .eq('user_id', session.user.id)
+        .order('payment_year', { ascending: false })
+        .order('payment_month', { ascending: false })
+
+      if (error || !data) return
+
+      // 2. Filter Logic
+      const now = new Date()
+      const currentMonth = now.getMonth() + 1
+      const currentYear = now.getFullYear()
+
+      const filtered = data.filter((p: any) => {
+        if (filter === 'this_month') {
+          return p.payment_month === currentMonth && p.payment_year === currentYear
+        }
+        if (filter === 'this_year') {
+          return p.payment_year === currentYear
+        }
+        if (filter === 'last_3') {
+          // Simple logic: convert to total months value (year * 12 + month)
+          const pVal = p.payment_year * 12 + p.payment_month
+          const nowVal = currentYear * 12 + currentMonth
+          return (nowVal - pVal) >= 0 && (nowVal - pVal) < 3
+        }
+        if (filter === 'last_6') {
+          const pVal = p.payment_year * 12 + p.payment_month
+          const nowVal = currentYear * 12 + currentMonth
+          return (nowVal - pVal) >= 0 && (nowVal - pVal) < 6
+        }
+        return true // 'all'
+      })
+
+      setPayments(filtered)
+
+      // 3. Calculate Stats
+      const paidCount = filtered.filter((p: any) => p.status === 'paid').length
+      const dueCount = filtered.filter((p: any) => p.status === 'due').length
+      const total = paidCount + dueCount
+      const rate = total > 0 ? Math.round((paidCount / total) * 100) : 0
+
+      setStats({ paid: paidCount, due: dueCount, rate })
+    }
+
+    fetchPayments()
+  }, [filter, session])
+
+  return (
+    <div className="space-y-6">
+      {/* FILTER BAR */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-2 items-center">
+        <span className="text-xs font-bold text-slate-500 uppercase mr-2">Time Range:</span>
+        {['this_month', 'last_3', 'last_6', 'this_year', 'all'].map(f => (
+          <button 
+            key={f} 
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1.5 rounded-full text-sm font-bold capitalize transition ${filter === f ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          >
+            {f.replace('_', ' ')}
+          </button>
+        ))}
+      </div>
+
+      {/* SUMMARY CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-green-100 bg-gradient-to-br from-white to-green-50">
+          <h3 className="text-xs font-bold text-green-600 uppercase mb-1">Total Paid</h3>
+          <p className="text-3xl font-extrabold text-green-700">{stats.paid}</p>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-red-100 bg-gradient-to-br from-white to-red-50">
+          <h3 className="text-xs font-bold text-red-600 uppercase mb-1">Pending Dues</h3>
+          <p className="text-3xl font-extrabold text-red-700">{stats.due}</p>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-100 bg-gradient-to-br from-white to-blue-50">
+          <h3 className="text-xs font-bold text-blue-600 uppercase mb-1">Collection Rate</h3>
+          <p className="text-3xl font-extrabold text-blue-700">{stats.rate}%</p>
+        </div>
+      </div>
+
+      {/* DETAILED LIST */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-4 border-b bg-slate-50">
+          <h2 className="font-bold text-slate-700">Payment History ({payments.length})</h2>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {payments.length === 0 ? (
+            <p className="p-8 text-center text-slate-400">No payment records found for this period.</p>
+          ) : (
+            payments.map((p) => (
+              <div key={p.id} className="p-4 flex justify-between items-center hover:bg-slate-50">
+                <div>
+                  <div className="font-bold text-slate-800">{p.students?.name || 'Unknown Student'}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    {getMonthName(p.payment_month)} {p.payment_year} • {p.students?.batch}
+                  </div>
+                </div>
+                <div>
+                  {p.status === 'paid' ? (
+                    <span className="px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold border border-green-200">
+                      Paid
+                    </span>
+                  ) : (
+                    <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold border border-red-200">
+                      Due
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- PAYMENT MODAL ---
 function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel }: any) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onCancel}>
