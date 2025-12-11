@@ -260,7 +260,7 @@ function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel 
   )
 }
 
-// --- DASHBOARD ---
+// --- DASHBOARD (UPDATED LOGIC) ---
 function Dashboard({ session }: { session: any }) {
   const [lessons, setLessons] = useState<any[]>([])
   const [students, setStudents] = useState<any[]>([])
@@ -271,11 +271,28 @@ function Dashboard({ session }: { session: any }) {
   const [tempLessonData, setTempLessonData] = useState<any>(null)
   const [modalStudentInfo, setModalStudentInfo] = useState<any>(null)
 
+  // UPDATED: Fetch students AND their current month's payment status
   const fetchData = async () => {
+    const { month, year } = getCurrentMonthYear()
+    
+    // 1. Fetch Lessons
     const { data: lData } = await supabase.from('lessons').select('*').eq('user_id', session.user.id).order('lesson_date', { ascending: false }).order('id', { ascending: false }).limit(20)
-    const { data: sData } = await supabase.from('students').select('*').eq('user_id', session.user.id)
     if (lData) setLessons(lData)
-    if (sData) setStudents(sData)
+
+    // 2. Fetch Students
+    const { data: sData, error: sError } = await supabase.from('students').select('*').eq('user_id', session.user.id)
+    if (sError || !sData) return
+
+    // 3. Fetch Payments for this month
+    const { data: pData, error: pError } = await supabase.from('payments').select('student_id, status').eq('user_id', session.user.id).eq('payment_month', month).eq('payment_year', year)
+    if (pError) return
+
+    // 4. Merge payment status into student data
+    const combinedStudents = sData.map(student => {
+        const paymentRecord = pData.find(p => p.student_id === student.id)
+        return { ...student, payment_status: paymentRecord ? paymentRecord.status : null }
+    })
+    setStudents(combinedStudents)
   }
   useEffect(() => { fetchData() }, [])
 
@@ -336,7 +353,8 @@ function Dashboard({ session }: { session: any }) {
       class_serial: currentSerial
     }
 
-    if (!editingId && target > 0 && currentSerial === target) {
+    // UPDATED LOGIC: Trigger if (New Entry) AND (Target Reached OR Exceeded) AND (Not yet Paid this month)
+    if (!editingId && target > 0 && currentSerial >= target && selectedStudent.payment_status !== 'paid') {
         setTempLessonData(lessonPayload)
         setModalStudentInfo({ name: selectedStudent.name, target: target, serial: currentSerial, studentId: selectedStudent.id })
         setShowPaymentModal(true)
