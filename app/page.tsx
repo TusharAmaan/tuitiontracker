@@ -16,10 +16,9 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 })
 
-// Helper to get current month and year for payments
+// Helper to get current month/year for payments
 const getCurrentMonthYear = () => {
   const now = new Date()
-  // Month is 0-indexed in JS, so we add 1 for readable 1-12 format
   return { month: now.getMonth() + 1, year: now.getFullYear() }
 }
 
@@ -408,31 +407,22 @@ function Dashboard({ session }: { session: any }) {
   )
 }
 
-// --- STUDENTS MANAGER (UPDATED WITH PAYMENT STATUS) ---
+// --- STUDENTS MANAGER ---
 function StudentsManager({ session }: { session: any }) {
   const [students, setStudents] = useState<any[]>([])
   const [form, setForm] = useState({ name: '', batch: '', subject: '', target: '' })
   const [editingId, setEditingId] = useState<number | null>(null)
 
-  // UPDATED fetchStudents to include payment status lookup
   const fetchStudents = async () => {
     const { month, year } = getCurrentMonthYear()
-
-    // 1. Get Students
     const { data: sData, error: sError } = await supabase.from('students').select('*').eq('user_id', session.user.id).order('id', { ascending: false })
     if (sError || !sData) { console.error(sError); return }
-
-    // 2. Get Payments for THIS month
     const { data: pData, error: pError } = await supabase.from('payments').select('student_id, status').eq('user_id', session.user.id).eq('payment_month', month).eq('payment_year', year)
     if (pError) { console.error(pError); return }
-
-    // 3. Merge data in JS
     const combinedData = sData.map(student => {
         const paymentRecord = pData.find(p => p.student_id === student.id)
-        // Attach a new property 'payment_status' to the student object
         return { ...student, payment_status: paymentRecord ? paymentRecord.status : null }
     })
-
     setStudents(combinedData)
   }
 
@@ -445,7 +435,7 @@ function StudentsManager({ session }: { session: any }) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit md:sticky md:top-2/4 z-10">
+      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit md:sticky md:top-24 z-10">
         <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Student' : 'Add Student'}</h2>{editingId && <button onClick={handleCancel} className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded font-bold">Cancel</button>}</div>
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           <input type="text" placeholder="Name" required className="p-3 border rounded-lg text-base text-slate-800" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
@@ -459,7 +449,6 @@ function StudentsManager({ session }: { session: any }) {
           <div key={s.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-3 ${editingId === s.id ? 'ring-2 ring-orange-400' : ''}`}>
             <div className="flex justify-between items-start">
                 <div>
-                    {/* NAME & PAYMENT STATUS BADGE */}
                     <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold text-slate-800 text-lg">{s.name}</h3>
                         {s.payment_status === 'paid' && <span className="text-xs font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-200">Paid</span>}
