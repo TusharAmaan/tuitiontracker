@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 // --- CONFIGURATION ---
@@ -16,10 +16,9 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 })
 
-// --- HELPER: Get current month/year ---
 const getCurrentMonthYear = () => {
   const now = new Date()
-  return { month: now.getMonth() + 1, year: now.getFullYear() } // Month is 1-12
+  return { month: now.getMonth() + 1, year: now.getFullYear() }
 }
 
 // --- MAIN CONTAINER ---
@@ -93,17 +92,152 @@ function LoginScreen() {
   )
 }
 
+// --- NEW COMPONENT: Profile Modal ---
+function ProfileModal({ session, onClose }: any) {
+  const [loading, setLoading] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Fetch Profile on Load
+  useEffect(() => {
+    const getProfile = async () => {
+      setLoading(true)
+      const { data } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', session.user.id).single()
+      if (data) {
+        setFullName(data.full_name || '')
+        setAvatarUrl(data.avatar_url || '')
+      }
+      setLoading(false)
+    }
+    getProfile()
+  }, [session])
+
+  // Handle Image Upload
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0) return
+    
+    setLoading(true)
+    const file = event.target.files[0]
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${session.user.id}-${Math.random()}.${fileExt}`
+    const filePath = `${fileName}`
+
+    // 1. Upload to Storage
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file)
+    
+    if (uploadError) {
+      alert('Error uploading image: ' + uploadError.message)
+    } else {
+      // 2. Get Public URL
+      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
+      setAvatarUrl(data.publicUrl)
+    }
+    setLoading(false)
+  }
+
+  // Handle Save
+  const handleSave = async () => {
+    setLoading(true)
+    const { error } = await supabase.from('profiles').upsert({
+      id: session.user.id,
+      full_name: fullName,
+      avatar_url: avatarUrl,
+      updated_at: new Date().toISOString()
+    })
+    
+    if (error) alert('Error saving profile: ' + error.message)
+    else onClose() // Close modal on success
+    setLoading(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full animate-bounce-in">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-extrabold text-slate-800">Edit Profile</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-24 h-24 rounded-full bg-slate-100 mb-3 overflow-hidden border-2 border-slate-200 relative">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-slate-300 text-3xl font-bold">
+                {fullName ? fullName[0].toUpperCase() : session.user.email[0].toUpperCase()}
+              </div>
+            )}
+          </div>
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="text-sm text-blue-600 font-bold hover:underline"
+          >
+            {loading ? 'Uploading...' : 'Change Photo'}
+          </button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept="image/*"
+            onChange={handleImageUpload}
+          />
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Email (Read Only)</label>
+            <input type="text" disabled value={session.user.email} className="w-full p-3 border rounded-lg bg-slate-50 text-slate-500 text-sm" />
+          </div>
+          
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Full Name</label>
+            <input 
+              type="text" 
+              placeholder="e.g. Mr. Anderson"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="w-full p-3 border rounded-lg text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" 
+            />
+          </div>
+
+          <button 
+            onClick={handleSave} 
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg mt-2"
+          >
+            {loading ? 'Saving...' : 'Save Profile'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- APP SHELL ---
 function AppShell({ session }: { session: any }) {
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [showProfile, setShowProfile] = useState(false)
 
   return (
     <main className="min-h-screen bg-slate-100 pb-20 md:pb-0 relative">
+      {/* HEADER */}
       <nav className="bg-white border-b px-4 py-3 sticky top-0 z-30 shadow-sm">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <h1 className="text-lg md:text-xl font-extrabold text-slate-800">TuitionTracker</h1>
-          <button onClick={() => supabase.auth.signOut()} className="text-xs md:text-sm text-red-500 font-bold hover:text-red-700">Exit</button>
+          
+          <div className="flex gap-4 items-center">
+            {/* PROFILE BUTTON */}
+            <button onClick={() => setShowProfile(true)} className="text-xs md:text-sm font-bold text-slate-600 hover:text-blue-600 flex items-center gap-1">
+              <span>👤</span> <span className="hidden md:inline">Profile</span>
+            </button>
+            {/* SIGN OUT BUTTON */}
+            <button onClick={() => supabase.auth.signOut()} className="text-xs md:text-sm text-red-500 font-bold hover:text-red-700 border border-red-100 bg-red-50 px-3 py-1.5 rounded-full transition">
+              Sign Out
+            </button>
+          </div>
         </div>
+        
         <div className="max-w-6xl mx-auto flex gap-2 mt-3 overflow-x-auto pb-1 no-scrollbar">
            {['dashboard', 'students', 'reports'].map(tab => (
              <button key={tab} onClick={() => setActiveTab(tab)} 
@@ -114,6 +248,9 @@ function AppShell({ session }: { session: any }) {
         </div>
       </nav>
 
+      {/* RENDER PROFILE MODAL */}
+      {showProfile && <ProfileModal session={session} onClose={() => setShowProfile(false)} />}
+
       <div className="max-w-6xl mx-auto p-4 md:p-8">
         {activeTab === 'dashboard' && <Dashboard session={session} />}
         {activeTab === 'students' && <StudentsManager session={session} />}
@@ -123,25 +260,19 @@ function AppShell({ session }: { session: any }) {
   )
 }
 
-// --- NEW COMPONENT: Payment Modal ---
+// --- (PREVIOUS COMPONENTS REMAIN UNCHANGED BELOW) ---
+// Note: To prevent errors, I am pasting the rest of the functions (Dashboard, StudentsManager, etc.) so the file is complete.
+
 function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel }: any) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full animate-bounce-in">
         <h2 className="text-xl font-extrabold text-slate-800 mb-2">Payment Alert! 💰</h2>
-        <p className="text-slate-600 mb-4">
-          <b>{studentName}</b> has reached class <b>#{currentSerial}</b>.
-          <br/>Their target is <b>{target} classes</b>.
-        </p>
+        <p className="text-slate-600 mb-4"><b>{studentName}</b> has reached class <b>#{currentSerial}</b>.<br/>Target: <b>{target} classes</b>.</p>
         <p className="font-bold text-slate-700 mb-6">Have they paid for this month?</p>
-        
         <div className="flex flex-col gap-3">
-          <button onClick={() => onConfirm('paid')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg">
-            ✅ Yes, Mark as Paid
-          </button>
-          <button onClick={() => onConfirm('due')} className="w-full bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 font-bold py-3 rounded-lg">
-            ❌ No, Mark as Due
-          </button>
+          <button onClick={() => onConfirm('paid')} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg">✅ Yes, Mark as Paid</button>
+          <button onClick={() => onConfirm('due')} className="w-full bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 font-bold py-3 rounded-lg">❌ No, Mark as Due</button>
         </div>
         <button onClick={onCancel} className="mt-4 text-center w-full text-sm text-slate-400 hover:underline">Cancel Entry</button>
       </div>
@@ -149,15 +280,12 @@ function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel 
   )
 }
 
-// --- DASHBOARD (With Payment Logic) ---
 function Dashboard({ session }: { session: any }) {
   const [lessons, setLessons] = useState<any[]>([])
   const [students, setStudents] = useState<any[]>([])
   const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], studentId: '', topic: '', serial: '' })
   const [editingId, setEditingId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
-
-  // State for Payment Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [tempLessonData, setTempLessonData] = useState<any>(null)
   const [modalStudentInfo, setModalStudentInfo] = useState<any>(null)
@@ -186,7 +314,6 @@ function Dashboard({ session }: { session: any }) {
     if(confirm('Delete this lesson permanently?')) { await supabase.from('lessons').delete().eq('id', id); fetchData(); }
   }
 
-  // Helper: Just save the lesson
   const saveLessonOnly = async (payload: any) => {
     let error
     if (editingId) {
@@ -199,7 +326,6 @@ function Dashboard({ session }: { session: any }) {
     finalizeSubmission(error)
   }
 
-  // Helper: Clean up after submission
   const finalizeSubmission = (error: any) => {
     if (!error) { handleCancel(); fetchData(); } 
     else { alert('Error saving lesson: ' + error.message) }
@@ -208,7 +334,6 @@ function Dashboard({ session }: { session: any }) {
     setModalStudentInfo(null)
   }
 
-  // 1. Intercept Form Submit
   const handleInitialSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -230,26 +355,20 @@ function Dashboard({ session }: { session: any }) {
       class_serial: currentSerial
     }
 
-    // CHECK CONDITION: If not editing AND serial matches target -> Show Pop-up
     if (!editingId && target > 0 && currentSerial === target) {
         setTempLessonData(lessonPayload)
         setModalStudentInfo({ name: selectedStudent.name, target: target, serial: currentSerial, studentId: selectedStudent.id })
         setShowPaymentModal(true)
         setLoading(false)
-        return // Stop here, wait for modal interaction
+        return
     }
-
-    // Otherwise, proceed normally
-    await saveLessonOnly(lessonPayload) // FIXED LINE
+    await saveLessonOnly(lessonPayload)
   }
 
-  // 2. Handle Modal Selection (Paid vs Due)
   const handlePaymentSelection = async (status: 'paid' | 'due') => {
       setShowPaymentModal(false)
       setLoading(true)
-
       const { month, year } = getCurrentMonthYear()
-
       const { error: paymentError } = await supabase.from('payments').upsert({
           user_id: session.user.id,
           student_id: modalStudentInfo.studentId,
@@ -258,19 +377,13 @@ function Dashboard({ session }: { session: any }) {
           status: status
       }, { onConflict: 'student_id, payment_month, payment_year' })
 
-      if(paymentError) {
-        alert('Error saving payment status: ' + paymentError.message)
-        setLoading(false)
-        return
-      }
-
+      if(paymentError) { alert('Error saving payment status: ' + paymentError.message); setLoading(false); return; }
       const { error: lessonError } = await supabase.from('lessons').insert([tempLessonData])
       finalizeSubmission(lessonError)
   }
 
   return (
     <>
-    {/* THE PAYMENT MODAL POPUP */}
     {showPaymentModal && modalStudentInfo && (
       <PaymentModal 
         studentName={modalStudentInfo.name} 
@@ -280,60 +393,31 @@ function Dashboard({ session }: { session: any }) {
         onCancel={() => { setShowPaymentModal(false); setLoading(false); }}
       />
     )}
-
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit md:sticky md:top-24 z-10">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Lesson' : 'New Lesson'}</h2>
           {editingId && <button onClick={handleCancel} className="text-xs text-red-500 font-bold bg-red-50 px-2 py-1 rounded">Cancel</button>}
         </div>
-        
-        {students.length === 0 ? (
-           <div className="text-center p-4 bg-yellow-50 text-yellow-800 rounded-lg text-sm">⚠ Add Students first!</div>
-        ) : (
+        {students.length === 0 ? <div className="text-center p-4 bg-yellow-50 text-yellow-800 rounded-lg text-sm">⚠ Add Students first!</div> : (
           <form onSubmit={handleInitialSubmit} className="flex flex-col gap-3">
-            <input type="date" required className="p-3 border rounded-lg text-base text-slate-800 bg-white" 
-              value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
-            
-            <select required className="p-3 border rounded-lg text-base text-slate-800 bg-white"
-              value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})}>
-              <option value="">Select Student...</option>
-              {students.map(s => <option key={s.id} value={s.id}>{s.name} (Target: {s.target_classes})</option>)}
-            </select>
-            
-            <input type="number" required placeholder="Class Serial No. (e.g. 12)" className="p-3 border rounded-lg text-base text-slate-800 bg-white"
-              value={formData.serial} onChange={e => setFormData({...formData, serial: e.target.value})} />
-
-            <textarea required rows={3} placeholder="What was taught?" className="p-3 border rounded-lg text-base text-slate-800 bg-white"
-              value={formData.topic} onChange={e => setFormData({...formData, topic: e.target.value})} />
-            
-            <button disabled={loading} className={`w-full text-white font-bold py-3 rounded-lg transition shadow-sm ${editingId ? 'bg-orange-500 active:bg-orange-600' : 'bg-blue-600 active:bg-blue-700'}`}>
-              {loading ? 'Saving...' : (editingId ? 'Update Lesson' : 'Add Lesson')}
-            </button>
+            <input type="date" required className="p-3 border rounded-lg text-base text-slate-800 bg-white" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+            <select required className="p-3 border rounded-lg text-base text-slate-800 bg-white" value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})}><option value="">Select Student...</option>{students.map(s => <option key={s.id} value={s.id}>{s.name} (Target: {s.target_classes})</option>)}</select>
+            <input type="number" required placeholder="Class Serial No. (e.g. 12)" className="p-3 border rounded-lg text-base text-slate-800 bg-white" value={formData.serial} onChange={e => setFormData({...formData, serial: e.target.value})} />
+            <textarea required rows={3} placeholder="What was taught?" className="p-3 border rounded-lg text-base text-slate-800 bg-white" value={formData.topic} onChange={e => setFormData({...formData, topic: e.target.value})} />
+            <button disabled={loading} className={`w-full text-white font-bold py-3 rounded-lg transition shadow-sm ${editingId ? 'bg-orange-500 active:bg-orange-600' : 'bg-blue-600 active:bg-blue-700'}`}>{loading ? 'Saving...' : (editingId ? 'Update Lesson' : 'Add Lesson')}</button>
           </form>
         )}
       </div>
-
       <div className="md:col-span-2 space-y-4">
         <h2 className="font-bold text-slate-700 px-2">Recent Lessons</h2>
         {lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No lessons yet.</p> : lessons.map((l) => (
           <div key={l.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-200 ${editingId === l.id ? 'ring-2 ring-orange-400' : ''}`}>
             <div className="flex justify-between items-start mb-3">
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <span className="font-bold text-lg text-slate-800">{l.student_name}</span>
-                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md border font-medium">{l.subject}</span>
-                  {l.class_serial && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}
-                </div>
-                <div className="text-xs text-slate-400">{l.batch}</div>
-              </div>
-              <span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{l.lesson_date}</span>
+              <div><div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-bold text-lg text-slate-800">{l.student_name}</span><span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md border font-medium">{l.subject}</span>{l.class_serial && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}</div><div className="text-xs text-slate-400">{l.batch}</div></div><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{l.lesson_date}</span>
             </div>
             <p className="text-slate-700 text-sm mb-4 whitespace-pre-wrap leading-relaxed">{l.lesson_topic}</p>
-            <div className="flex gap-3 border-t pt-3 mt-2">
-              <button onClick={() => handleEdit(l)} className="flex-1 py-2 text-xs font-bold text-orange-600 bg-orange-50 rounded hover:bg-orange-100">Edit</button>
-              <button onClick={() => handleDelete(l.id)} className="flex-1 py-2 text-xs font-bold text-red-600 bg-red-50 rounded hover:bg-red-100">Delete</button>
-            </div>
+            <div className="flex gap-3 border-t pt-3 mt-2"><button onClick={() => handleEdit(l)} className="flex-1 py-2 text-xs font-bold text-orange-600 bg-orange-50 rounded hover:bg-orange-100">Edit</button><button onClick={() => handleDelete(l.id)} className="flex-1 py-2 text-xs font-bold text-red-600 bg-red-50 rounded hover:bg-red-100">Delete</button></div>
           </div>
         ))}
       </div>
@@ -342,7 +426,6 @@ function Dashboard({ session }: { session: any }) {
   )
 }
 
-// --- STUDENTS MANAGER ---
 function StudentsManager({ session }: { session: any }) {
   const [students, setStudents] = useState<any[]>([])
   const [form, setForm] = useState({ name: '', batch: '', subject: '', target: '' })
@@ -376,7 +459,6 @@ function StudentsManager({ session }: { session: any }) {
   )
 }
 
-// --- REPORTS ---
 function ReportsView({ session }: { session: any }) {
   const [filterType, setFilterType] = useState('student'); const [filterValue, setFilterValue] = useState(''); const [lessons, setLessons] = useState<any[]>([]); const [options, setOptions] = useState<string[]>([]);
   useEffect(() => { const load = async () => { const { data } = await supabase.from('students').select('*').eq('user_id', session.user.id); if (data) { const unique = Array.from(new Set(data.map((item: any) => filterType === 'student' ? item.name : filterType === 'batch' ? item.batch : item.subject))).filter(Boolean) as string[]; setOptions(unique); setFilterValue(''); setLessons([]); } }; load(); }, [filterType])
