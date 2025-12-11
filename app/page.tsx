@@ -16,17 +16,15 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 })
 
-// --- HELPER: Date Formatter (Day, Month DD, YYYY) ---
+// --- HELPER: Date Formatter ---
 const formatDate = (dateStr: string) => {
   if (!dateStr) return ''
   const date = new Date(dateStr)
-  // We use 'UTC' logic or simple string splitting to prevent timezone shifts
-  // But standard toLocaleDateString usually works fine for display
   return date.toLocaleDateString('en-US', { 
-    weekday: 'long', // "Sunday"
-    year: 'numeric', // "2025"
-    month: 'short',  // "Dec"
-    day: 'numeric'   // "11"
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'short',  
+    day: 'numeric'   
   })
 }
 
@@ -164,8 +162,8 @@ function ProfileModal({ session, onClose, onUpdate }: any) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full animate-bounce-in">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full animate-bounce-in" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-extrabold text-slate-800">Edit Profile</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
@@ -222,6 +220,12 @@ function AppShell({ session }: { session: any }) {
 
   useEffect(() => { fetchProfileName() }, [session])
 
+  // FIX: Force Sign Out
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    window.location.reload() // Force reload to clear state and show login
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 pb-20 md:pb-0 relative">
       <nav className="bg-white border-b px-4 py-3 sticky top-0 z-30 shadow-sm">
@@ -233,7 +237,7 @@ function AppShell({ session }: { session: any }) {
               {avatar ? ( <img src={avatar} alt="User" className="w-6 h-6 rounded-full object-cover border border-slate-200" /> ) : ( <span>👤</span> )}
               <span className="hidden md:inline max-w-[100px] truncate">{profileName}</span>
             </button>
-            <button onClick={() => supabase.auth.signOut()} className="text-xs md:text-sm text-red-500 font-bold hover:text-red-700 border border-red-100 bg-red-50 px-3 py-1.5 rounded-full transition">Sign Out</button>
+            <button onClick={handleSignOut} className="text-xs md:text-sm text-red-500 font-bold hover:text-red-700 border border-red-100 bg-red-50 px-3 py-1.5 rounded-full transition">Sign Out</button>
           </div>
         </div>
         
@@ -255,11 +259,11 @@ function AppShell({ session }: { session: any }) {
   )
 }
 
-// --- PAYMENT MODAL ---
+// --- PAYMENT MODAL (FIXED CLOSE) ---
 function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel }: any) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full animate-bounce-in">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+      <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full animate-bounce-in" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-xl font-extrabold text-slate-800 mb-2">Payment Alert! 💰</h2>
         <p className="text-slate-600 mb-4"><b>{studentName}</b> has reached class <b>#{currentSerial}</b>.<br/>Target: <b>{target} classes</b>.</p>
         <p className="font-bold text-slate-700 mb-6">Have they paid for this month?</p>
@@ -273,7 +277,7 @@ function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel 
   )
 }
 
-// --- DASHBOARD (UPDATED LOGIC) ---
+// --- DASHBOARD ---
 function Dashboard({ session }: { session: any }) {
   const [lessons, setLessons] = useState<any[]>([])
   const [students, setStudents] = useState<any[]>([])
@@ -284,23 +288,14 @@ function Dashboard({ session }: { session: any }) {
   const [tempLessonData, setTempLessonData] = useState<any>(null)
   const [modalStudentInfo, setModalStudentInfo] = useState<any>(null)
 
-  // UPDATED: Fetch students AND their current month's payment status
   const fetchData = async () => {
     const { month, year } = getCurrentMonthYear()
-    
-    // 1. Fetch Lessons
     const { data: lData } = await supabase.from('lessons').select('*').eq('user_id', session.user.id).order('lesson_date', { ascending: false }).order('id', { ascending: false }).limit(20)
     if (lData) setLessons(lData)
-
-    // 2. Fetch Students
     const { data: sData, error: sError } = await supabase.from('students').select('*').eq('user_id', session.user.id)
     if (sError || !sData) return
-
-    // 3. Fetch Payments for this month
     const { data: pData, error: pError } = await supabase.from('payments').select('student_id, status').eq('user_id', session.user.id).eq('payment_month', month).eq('payment_year', year)
     if (pError) return
-
-    // 4. Merge payment status into student data
     const combinedStudents = sData.map(student => {
         const paymentRecord = pData.find(p => p.student_id === student.id)
         return { ...student, payment_status: paymentRecord ? paymentRecord.status : null }
@@ -366,7 +361,6 @@ function Dashboard({ session }: { session: any }) {
       class_serial: currentSerial
     }
 
-    // UPDATED LOGIC: Trigger if (New Entry) AND (Target Reached OR Exceeded) AND (Not yet Paid this month)
     if (!editingId && target > 0 && currentSerial >= target && selectedStudent.payment_status !== 'paid') {
         setTempLessonData(lessonPayload)
         setModalStudentInfo({ name: selectedStudent.name, target: target, serial: currentSerial, studentId: selectedStudent.id })
@@ -444,7 +438,6 @@ function SubjectSelector({ session, selectedSubjects, onChange }: any) {
   const [newSubject, setNewSubject] = useState('')
   const [showInput, setShowInput] = useState(false)
 
-  // Load existing subjects
   useEffect(() => {
     const fetchSubs = async () => {
       const { data } = await supabase.from('subjects').select('*').eq('user_id', session.user.id)
@@ -453,7 +446,6 @@ function SubjectSelector({ session, selectedSubjects, onChange }: any) {
     fetchSubs()
   }, [session])
 
-  // Create new subject
   const handleCreate = async () => {
     if (!newSubject.trim()) return
     const { data, error } = await supabase.from('subjects').insert([{ user_id: session.user.id, name: newSubject.trim() }]).select()
@@ -461,12 +453,10 @@ function SubjectSelector({ session, selectedSubjects, onChange }: any) {
       setSubjects([...subjects, data[0]])
       setNewSubject('')
       setShowInput(false)
-      // Auto-select the new one
       onChange([...selectedSubjects, data[0].name]) 
     }
   }
 
-  // Toggle selection
   const toggleSubject = (name: string) => {
     if (selectedSubjects.includes(name)) {
       onChange(selectedSubjects.filter((s: string) => s !== name))
@@ -494,15 +484,7 @@ function SubjectSelector({ session, selectedSubjects, onChange }: any) {
       
       {showInput && (
         <div className="flex gap-2">
-          <input 
-            type="text" 
-            autoFocus
-            placeholder="New Subject Name" 
-            className="flex-1 p-2 border rounded text-sm text-slate-800"
-            value={newSubject}
-            onChange={e => setNewSubject(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleCreate())}
-          />
+          <input type="text" autoFocus placeholder="New Subject Name" className="flex-1 p-2 border rounded text-sm text-slate-800" value={newSubject} onChange={e => setNewSubject(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleCreate())} />
           <button type="button" onClick={handleCreate} className="px-4 bg-green-600 text-white rounded text-sm font-bold">Save</button>
         </div>
       )}
@@ -510,10 +492,9 @@ function SubjectSelector({ session, selectedSubjects, onChange }: any) {
   )
 }
 
-// --- STUDENTS MANAGER (UPDATED FOR MULTI-SUBJECT) ---
+// --- STUDENTS MANAGER ---
 function StudentsManager({ session }: { session: any }) {
   const [students, setStudents] = useState<any[]>([])
-  // 'subject' is now an array of strings
   const [form, setForm] = useState({ name: '', batch: '', subjects: [] as string[], target: '' })
   const [editingId, setEditingId] = useState<number | null>(null)
 
@@ -521,20 +502,11 @@ function StudentsManager({ session }: { session: any }) {
     const { month, year } = getCurrentMonthYear()
     const { data: sData, error: sError } = await supabase.from('students').select('*').eq('user_id', session.user.id).order('id', { ascending: false })
     if (sError || !sData) return
-
-    // Fetch payments
-    const { data: pData } = await supabase.from('payments').select('student_id, status').eq('user_id', session.user.id).eq('payment_month', month).eq('payment_year', year)
-    
+    const { data: pData, error: pError } = await supabase.from('payments').select('student_id, status').eq('user_id', session.user.id).eq('payment_month', month).eq('payment_year', year)
     const combinedData = sData.map(student => {
         const paymentRecord = pData?.find(p => p.student_id === student.id)
-        // Convert old string subject to array if needed (migration logic)
         let subList = []
-        try {
-           subList = JSON.parse(student.subject) 
-        } catch {
-           subList = student.subject ? [student.subject] : [] // Handle legacy single string
-        }
-        
+        try { subList = JSON.parse(student.subject) } catch { subList = student.subject ? [student.subject] : [] }
         return { ...student, subjects: Array.isArray(subList) ? subList : [subList], payment_status: paymentRecord ? paymentRecord.status : null }
     })
     setStudents(combinedData)
@@ -542,36 +514,10 @@ function StudentsManager({ session }: { session: any }) {
 
   useEffect(() => { fetchStudents() }, [])
 
-  const handleEdit = (s: any) => { 
-    setEditingId(s.id); 
-    setForm({ name: s.name, batch: s.batch, subjects: s.subjects || [], target: s.target_classes }); 
-    window.scrollTo({ top: 0, behavior: 'smooth' }); 
-  }
-  
+  const handleEdit = (s: any) => { setEditingId(s.id); setForm({ name: s.name, batch: s.batch, subjects: s.subjects || [], target: s.target_classes }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   const handleCancel = () => { setEditingId(null); setForm({ name: '', batch: '', subjects: [], target: '' }); }
+  const handleSave = async (e: React.FormEvent) => { e.preventDefault(); const payload = { user_id: session.user.id, name: form.name, batch: form.batch, subject: JSON.stringify(form.subjects), target_classes: parseInt(form.target) || 0 }; let error; if (editingId) { const { error: err } = await supabase.from('students').update(payload).eq('id', editingId); error = err } else { const { error: err } = await supabase.from('students').insert([payload]); error = err }; if(!error) { handleCancel(); fetchStudents(); } else { alert(error.message) } }
   
-  const handleSave = async (e: React.FormEvent) => { 
-    e.preventDefault(); 
-    // Save subjects as JSON string in the 'subject' column (simple way to handle arrays in existing schema)
-    const payload = { 
-      user_id: session.user.id, 
-      name: form.name, 
-      batch: form.batch, 
-      subject: JSON.stringify(form.subjects), // Storing array as string
-      target_classes: parseInt(form.target) || 0 
-    }; 
-    
-    let error; 
-    if (editingId) { 
-        const { error: err } = await supabase.from('students').update(payload).eq('id', editingId); 
-        error = err 
-    } else { 
-        const { error: err } = await supabase.from('students').insert([payload]); 
-        error = err 
-    }; 
-    if(!error) { handleCancel(); fetchStudents(); } else { alert(error.message) } 
-  }
-
   const handleDelete = async (id: number) => { 
     if(!confirm('Delete this student?')) return;
     await supabase.from('payments').delete().eq('student_id', id);
@@ -586,22 +532,12 @@ function StudentsManager({ session }: { session: any }) {
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           <input type="text" placeholder="Name" required className="p-3 border rounded-lg text-base text-slate-800" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
           <input type="text" placeholder="Batch" className="p-3 border rounded-lg text-base text-slate-800" value={form.batch} onChange={e => setForm({...form, batch: e.target.value})} />
-          
-          {/* NEW SUBJECT SELECTOR */}
-          <SubjectSelector 
-            session={session} 
-            selectedSubjects={form.subjects} 
-            onChange={(newSubs: string[]) => setForm({...form, subjects: newSubs})} 
-          />
-
+          <SubjectSelector session={session} selectedSubjects={form.subjects} onChange={(newSubs: string[]) => setForm({...form, subjects: newSubs})} />
           <input type="number" placeholder="Class Target" className="p-3 border rounded-lg text-base text-slate-800" value={form.target} onChange={e => setForm({...form, target: e.target.value})} />
           <button className={`w-full text-white font-bold py-3 rounded-lg transition shadow-sm ${editingId ? 'bg-orange-500' : 'bg-green-600'}`}>{editingId ? 'Update Student' : 'Add Student'}</button>
         </form>
       </div>
-      
-      <div className="md:col-span-2 space-y-4">
-        <h2 className="font-bold text-slate-700 px-2">Your Students</h2>
-        {students.map(s => (
+      <div className="md:col-span-2 space-y-4"><h2 className="font-bold text-slate-700 px-2">Your Students</h2>{students.map(s => (
           <div key={s.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-3 ${editingId === s.id ? 'ring-2 ring-orange-400' : ''}`}>
             <div className="flex justify-between items-start">
                 <div>
@@ -611,61 +547,24 @@ function StudentsManager({ session }: { session: any }) {
                         {s.payment_status === 'due' && <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full border border-red-200 animate-pulse">Due</span>}
                     </div>
                     <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-1 items-center">
-                        <span className="font-medium text-slate-700">{s.batch}</span>
-                        <span className="text-slate-300">•</span>
-                        {/* Display Subjects Tags */}
-                        {s.subjects && s.subjects.map((sub: string) => (
-                            <span key={sub} className="bg-slate-100 px-2 py-0.5 rounded text-xs border">{sub}</span>
-                        ))}
+                        <span className="font-medium text-slate-700">{s.batch}</span><span className="text-slate-300">•</span>
+                        {s.subjects && s.subjects.map((sub: string) => (<span key={sub} className="bg-slate-100 px-2 py-0.5 rounded text-xs border">{sub}</span>))}
                     </div>
                 </div>
                 <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold">Target: {s.target_classes}</span>
             </div>
             <div className="flex gap-3 border-t pt-3"><button onClick={() => handleEdit(s)} className="flex-1 py-2 text-xs font-bold text-orange-600 bg-orange-50 rounded hover:bg-orange-100">Edit</button><button onClick={() => handleDelete(s.id)} className="flex-1 py-2 text-xs font-bold text-red-600 bg-red-50 rounded hover:bg-red-100">Delete</button></div>
           </div>
-        ))}
-        {students.length === 0 && <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No students yet.</p>}
-      </div>
+        ))}{students.length === 0 && <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No students yet.</p>}</div>
     </div>
   )
 }
 
-// --- REPORTS (UPDATED FOR MULTI-SUBJECT & Date Format) ---
+// --- REPORTS ---
 function ReportsView({ session }: { session: any }) {
   const [filterType, setFilterType] = useState('student'); const [filterValue, setFilterValue] = useState(''); const [lessons, setLessons] = useState<any[]>([]); const [options, setOptions] = useState<string[]>([]);
-  
-  useEffect(() => { 
-    const load = async () => { 
-      // 1. Get Students
-      const { data: sData } = await supabase.from('students').select('*').eq('user_id', session.user.id);
-      // 2. Get Subjects List
-      const { data: subData } = await supabase.from('subjects').select('*').eq('user_id', session.user.id);
-      
-      if (sData) { 
-        let unique: string[] = []
-        if (filterType === 'student') unique = Array.from(new Set(sData.map((s: any) => s.name)))
-        else if (filterType === 'batch') unique = Array.from(new Set(sData.map((s: any) => s.batch)))
-        else if (filterType === 'subject') unique = subData ? subData.map((s: any) => s.name) : []
-        
-        setOptions(unique.filter(Boolean))
-        setFilterValue('')
-        setLessons([])
-      } 
-    }; load(); 
-  }, [filterType])
-
-  useEffect(() => { 
-    const loadL = async () => { 
-        if (!filterValue) return; 
-        let q = supabase.from('lessons').select('*').eq('user_id', session.user.id); 
-        if (filterType === 'student') q = q.eq('student_name', filterValue); 
-        else if (filterType === 'batch') q = q.eq('batch', filterValue); 
-        else if (filterType === 'subject') q = q.eq('subject', filterValue); 
-        const { data } = await q.order('lesson_date', { ascending: false }); 
-        if (data) setLessons(data); 
-    }; loadL(); 
-  }, [filterValue])
-
+  useEffect(() => { const load = async () => { const { data: sData } = await supabase.from('students').select('*').eq('user_id', session.user.id); const { data: subData } = await supabase.from('subjects').select('*').eq('user_id', session.user.id); if (sData) { let unique: string[] = []; if (filterType === 'student') unique = Array.from(new Set(sData.map((s: any) => s.name))); else if (filterType === 'batch') unique = Array.from(new Set(sData.map((s: any) => s.batch))); else if (filterType === 'subject') unique = subData ? subData.map((s: any) => s.name) : []; setOptions(unique.filter(Boolean)); setFilterValue(''); setLessons([]); } }; load(); }, [filterType])
+  useEffect(() => { const loadL = async () => { if (!filterValue) return; let q = supabase.from('lessons').select('*').eq('user_id', session.user.id); if (filterType === 'student') q = q.eq('student_name', filterValue); else if (filterType === 'batch') q = q.eq('batch', filterValue); else if (filterType === 'subject') q = q.eq('subject', filterValue); const { data } = await q.order('lesson_date', { ascending: false }); if (data) setLessons(data); }; loadL(); }, [filterValue])
   return (
     <div className="space-y-6"><div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200"><label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Filter By</label><div className="flex bg-slate-100 rounded-lg p-1 mb-4 overflow-x-auto">{['student', 'batch', 'subject'].map(t => <button key={t} onClick={() => setFilterType(t)} className={`flex-1 px-3 py-2 rounded-md text-sm font-bold capitalize whitespace-nowrap ${filterType === t ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>{t}</button>)}</div><label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Select {filterType}</label><select className="w-full p-3 border rounded-lg text-base text-slate-800 bg-white" value={filterValue} onChange={e => setFilterValue(e.target.value)}><option value="">-- Select --</option>{options.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
       {filterValue && (<div className="space-y-4"><div className="flex justify-between items-center px-2"><h2 className="font-bold text-slate-700">Results: "{filterValue}"</h2><span className="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full">{lessons.length}</span></div>{lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No records.</p> : lessons.map(l => (<div key={l.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{formatDate(l.lesson_date)}</span>{l.class_serial && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-md border border-blue-200 font-bold">Class #{l.class_serial}</span>}</div><div className="font-bold text-slate-800 mb-2">{l.lesson_topic}</div><div className="text-xs text-slate-500 flex gap-2">{filterType !== 'student' && <span className="bg-slate-100 px-2 py-1 rounded">👤 {l.student_name}</span>}{filterType !== 'batch' && <span className="bg-slate-100 px-2 py-1 rounded">🎓 {l.batch}</span>}{filterType !== 'subject' && <span className="bg-slate-100 px-2 py-1 rounded">📚 {l.subject}</span>}</div></div>))}</div>)}</div>
