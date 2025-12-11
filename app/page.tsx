@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
-// --- Initialize Supabase ---
+// --- Config ---
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(supabaseUrl, supabaseKey)
@@ -11,27 +11,20 @@ export default function Home() {
   const [session, setSession] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
-  // Check if user is logged in on load
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       setLoading(false)
     })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-    })
-
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session))
     return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) return <div className="p-10 text-center">Loading TuitionTracker...</div>
-
-  // If logged in, show Dashboard. If not, show Login.
-  return session ? <Dashboard session={session} /> : <LoginScreen />
+  if (loading) return <div className="p-10 text-center text-slate-500">Loading TuitionTracker...</div>
+  return session ? <AppShell session={session} /> : <LoginScreen />
 }
 
-// --- Component 1: Login Screen ---
+// --- LOGIN SCREEN ---
 function LoginScreen() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
@@ -39,193 +32,321 @@ function LoginScreen() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    // Sends a "Magic Link" to email (Passwordless login - very secure)
     const { error } = await supabase.auth.signInWithOtp({ email })
     if (error) alert(error.message)
     else alert('Check your email for the login link!')
     setLoading(false)
   }
 
-  const handleGoogleLogin = async () => {
-    await supabase.auth.signInWithOAuth({ provider: 'google' })
-  }
+  const handleGoogle = async () => supabase.auth.signInWithOAuth({ provider: 'google' })
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-      <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center">
-        <h1 className="text-3xl font-bold text-slate-800 mb-6">TuitionTracker</h1>
-        <p className="text-gray-500 mb-6">Sign in to manage your lessons securely.</p>
-        
-        <form onSubmit={handleLogin} className="space-y-4">
-          <input
-            type="email"
-            placeholder="Enter your email"
-            className="w-full p-3 border border-gray-300 rounded-lg text-black focus:ring-2 focus:ring-blue-500 outline-none"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <button disabled={loading} className="w-full bg-blue-600 text-white font-bold p-3 rounded-lg hover:bg-blue-700 transition">
-            {loading ? 'Sending Link...' : 'Sign in with Email'}
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+      <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border border-slate-200">
+        <h1 className="text-3xl font-extrabold text-slate-800 mb-2">TuitionTracker</h1>
+        <p className="text-slate-500 mb-8">Manage your students and lessons.</p>
+        <form onSubmit={handleLogin} className="space-y-4 mb-6">
+          <input type="email" placeholder="Enter your email" required 
+            className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
+            value={email} onChange={e => setEmail(e.target.value)} />
+          <button disabled={loading} className="w-full bg-blue-600 text-white font-bold p-3 rounded-lg hover:bg-blue-700">
+            {loading ? 'Sending...' : 'Sign in with Email'}
           </button>
         </form>
-
-        <div className="my-6 flex items-center">
-          <div className="flex-1 border-t border-gray-300"></div>
-          <span className="px-3 text-gray-500 text-sm">OR</span>
-          <div className="flex-1 border-t border-gray-300"></div>
-        </div>
-
-        <button onClick={handleGoogleLogin} className="w-full border border-gray-300 bg-white text-gray-700 font-bold p-3 rounded-lg hover:bg-gray-50 transition flex justify-center items-center gap-2">
-           Sign in with Google
-        </button>
+        <div className="relative mb-6"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div><div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-slate-500">Or continue with</span></div></div>
+        <button onClick={handleGoogle} className="w-full border bg-white text-slate-700 font-bold p-3 rounded-lg hover:bg-slate-50">Google</button>
       </div>
     </div>
   )
 }
 
-// --- Component 2: Dashboard (Your App) ---
+// --- MAIN APP SHELL ---
+function AppShell({ session }: { session: any }) {
+  const [activeTab, setActiveTab] = useState('dashboard')
+
+  return (
+    <main className="min-h-screen bg-slate-100">
+      {/* Header */}
+      <nav className="bg-white border-b border-slate-200 px-4 py-3 flex justify-between items-center sticky top-0 z-10">
+        <h1 className="text-xl font-extrabold text-slate-800">TuitionTracker</h1>
+        <div className="flex gap-2">
+           {['dashboard', 'students', 'reports'].map(tab => (
+             <button key={tab} onClick={() => setActiveTab(tab)} 
+               className={`px-4 py-2 rounded-full text-sm font-bold capitalize transition-colors ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>
+               {tab}
+             </button>
+           ))}
+           <button onClick={() => supabase.auth.signOut()} className="ml-2 text-sm text-red-500 font-bold hover:text-red-700">Exit</button>
+        </div>
+      </nav>
+
+      <div className="max-w-5xl mx-auto p-4 md:p-8">
+        {activeTab === 'dashboard' && <Dashboard session={session} />}
+        {activeTab === 'students' && <StudentsManager session={session} />}
+        {activeTab === 'reports' && <ReportsView session={session} />}
+      </div>
+    </main>
+  )
+}
+
+// --- TAB 1: DASHBOARD ---
 function Dashboard({ session }: { session: any }) {
   const [lessons, setLessons] = useState<any[]>([])
+  const [students, setStudents] = useState<any[]>([])
+  const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], studentId: '', topic: '' })
   const [loading, setLoading] = useState(false)
-  const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    student: '',
-    classNo: '',
-    batch: '',
-    topic: ''
-  })
 
-  // Fetch Data (Only for this user)
-  useEffect(() => { fetchLessons() }, [])
-
-  const fetchLessons = async () => {
-    const { data } = await supabase
-      .from('lessons')
-      .select('*')
-      .eq('user_id', session.user.id) // Secure filter
-      .order('id', { ascending: false })
-    if (data) setLessons(data)
+  // Fetch Data
+  const fetchData = async () => {
+    const { data: lData } = await supabase.from('lessons').select('*').eq('user_id', session.user.id).order('id', { ascending: false }).limit(10)
+    const { data: sData } = await supabase.from('students').select('*').eq('user_id', session.user.id)
+    if (lData) setLessons(lData)
+    if (sData) setStudents(sData)
   }
+  useEffect(() => { fetchData() }, [])
 
+  // Handle Add Lesson
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     
-    // Add user_id to the data
-    const { error } = await supabase.from('lessons').insert([{ 
-        user_id: session.user.id, // CRITICAL FIX
-        student_name: formData.student,
-        class_no: formData.classNo,
-        batch: formData.batch,
-        lesson_topic: formData.topic,
-        lesson_date: formData.date
+    // Find selected student details to auto-fill
+    const selectedStudent = students.find(s => s.id.toString() === formData.studentId)
+    if (!selectedStudent) { alert('Please select a student'); setLoading(false); return; }
+
+    const { error } = await supabase.from('lessons').insert([{
+      user_id: session.user.id,
+      student_name: selectedStudent.name,
+      class_no: selectedStudent.class_no || 'N/A', // Assuming you might add class_no to student table later or just omit
+      batch: selectedStudent.batch,
+      subject: selectedStudent.subject,
+      lesson_topic: formData.topic,
+      lesson_date: formData.date
     }])
 
-    if (error) {
-      console.error(error)
-      alert('Error saving data: ' + error.message)
+    if (!error) {
+      setFormData({ ...formData, topic: '' })
+      fetchData()
     } else {
-      setFormData({ ...formData, student: '', topic: '' })
-      fetchLessons()
+      alert('Error: ' + error.message)
     }
     setLoading(false)
   }
 
   const handleDelete = async (id: number) => {
-    if(confirm('Delete this track?')) {
-      await supabase.from('lessons').delete().eq('id', id).eq('user_id', session.user.id)
-      fetchLessons()
-    }
+    if(confirm('Delete this lesson?')) { await supabase.from('lessons').delete().eq('id', id); fetchData(); }
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-4 md:p-8">
-      <div className="max-w-5xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">TuitionTracker</h1>
-          <button onClick={() => supabase.auth.signOut()} className="text-sm text-red-600 hover:underline font-medium">
-            Sign Out
-          </button>
-        </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* ADD LESSON CARD */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
+        <h2 className="text-lg font-bold mb-4 text-slate-800">New Lesson Entry</h2>
+        {students.length === 0 ? (
+           <div className="text-center p-4 bg-yellow-50 text-yellow-800 rounded-lg text-sm">
+             ⚠ You need to add Students first! Go to the <b>Students</b> tab.
+           </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <input type="date" required className="p-2 border rounded-md text-slate-800 outline-none focus:border-blue-500" 
+              value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+            
+            <select required className="p-2 border rounded-md text-slate-800 outline-none focus:border-blue-500 bg-white"
+              value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})}>
+              <option value="">Select Student...</option>
+              {students.map(s => <option key={s.id} value={s.id}>{s.name} ({s.subject})</option>)}
+            </select>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Input Form */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
-            <h2 className="text-lg font-bold mb-4 text-slate-800">Add Entry</h2>
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase">Date</label>
-                <input type="date" required 
-                  className="w-full mt-1 p-2 border border-slate-300 rounded-md text-black bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase">Student Name</label>
-                <input type="text" required placeholder="Student Name"
-                  className="w-full mt-1 p-2 border border-slate-300 rounded-md text-black bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.student} onChange={e => setFormData({...formData, student: e.target.value})} />
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Class</label>
-                  <input type="text" placeholder="10"
-                    className="w-full mt-1 p-2 border border-slate-300 rounded-md text-black bg-white outline-none"
-                    value={formData.classNo} onChange={e => setFormData({...formData, classNo: e.target.value})} />
-                </div>
-                <div className="flex-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Batch</label>
-                  <input type="text" placeholder="A"
-                    className="w-full mt-1 p-2 border border-slate-300 rounded-md text-black bg-white outline-none"
-                    value={formData.batch} onChange={e => setFormData({...formData, batch: e.target.value})} />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase">Lesson Taught</label>
-                <textarea required rows={3} placeholder="Details..."
-                  className="w-full mt-1 p-2 border border-slate-300 rounded-md text-black bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.topic} onChange={e => setFormData({...formData, topic: e.target.value})} />
-              </div>
-              <button disabled={loading} className="mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-md transition-colors">
-                {loading ? 'Saving...' : 'Add Track'}
-              </button>
-            </form>
-          </div>
+            <textarea required rows={3} placeholder="What was taught?" className="p-2 border rounded-md text-slate-800 outline-none focus:border-blue-500"
+              value={formData.topic} onChange={e => setFormData({...formData, topic: e.target.value})} />
+            
+            <button disabled={loading} className="bg-blue-600 text-white font-bold py-2 rounded-md hover:bg-blue-700 transition">
+              {loading ? 'Saving...' : 'Add Lesson'}
+            </button>
+          </form>
+        )}
+      </div>
 
-          {/* History List */}
-          <div className="md:col-span-2">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
-                <h2 className="font-bold text-slate-700">My Lessons</h2>
-                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">{lessons.length}</span>
+      {/* RECENT HISTORY */}
+      <div className="md:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-4 border-b bg-slate-50"><h2 className="font-bold text-slate-700">Recent Activity</h2></div>
+        <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+          {lessons.length === 0 ? <p className="p-8 text-center text-slate-400">No lessons recorded yet.</p> : lessons.map((l) => (
+            <div key={l.id} className="p-4 hover:bg-slate-50 flex justify-between items-start group">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-800">{l.student_name}</span>
+                  <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded border">{l.subject}</span>
+                  <span className="text-xs text-slate-400">{l.batch}</span>
+                </div>
+                <p className="text-slate-600 text-sm mt-1">{l.lesson_topic}</p>
               </div>
-              <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-                {lessons.length === 0 ? (
-                    <p className="p-8 text-center text-slate-400">No lessons yet.</p>
-                ) : (
-                    lessons.map((lesson) => (
-                    <div key={lesson.id} className="p-4 hover:bg-slate-50 transition group">
-                        <div className="flex justify-between items-start mb-2">
-                            <div>
-                                <span className="font-bold text-slate-800 text-lg">{lesson.student_name}</span>
-                                <span className="ml-2 text-xs font-medium text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded">
-                                    {lesson.class_no} • {lesson.batch}
-                                </span>
-                            </div>
-                            <div className="text-right">
-                                <span className="block text-xs font-bold text-slate-400 uppercase">{lesson.lesson_date}</span>
-                                <button onClick={() => handleDelete(lesson.id)} className="text-xs text-red-400 hover:text-red-600 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">Delete</button>
-                            </div>
-                        </div>
-                        <p className="text-slate-700 text-sm bg-slate-50 p-2 rounded border border-slate-100">{lesson.lesson_topic}</p>
-                    </div>
-                    ))
-                )}
+              <div className="text-right">
+                <span className="block text-xs font-bold text-slate-400">{l.lesson_date}</span>
+                <button onClick={() => handleDelete(l.id)} className="text-xs text-red-400 hover:text-red-600 mt-1 opacity-0 group-hover:opacity-100">Delete</button>
               </div>
             </div>
-          </div>
+          ))}
         </div>
       </div>
-    </main>
+    </div>
+  )
+}
+
+// --- TAB 2: STUDENTS MANAGER ---
+function StudentsManager({ session }: { session: any }) {
+  const [students, setStudents] = useState<any[]>([])
+  const [form, setForm] = useState({ name: '', batch: '', subject: '', target: '' })
+  
+  const fetchStudents = async () => {
+    const { data } = await supabase.from('students').select('*').eq('user_id', session.user.id)
+    if(data) setStudents(data)
+  }
+  useEffect(() => { fetchStudents() }, [])
+
+  const addStudent = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const { error } = await supabase.from('students').insert([{
+      user_id: session.user.id,
+      name: form.name,
+      batch: form.batch,
+      subject: form.subject,
+      target_classes: parseInt(form.target) || 0
+    }])
+    if(!error) { setForm({ name: '', batch: '', subject: '', target: '' }); fetchStudents(); }
+  }
+
+  const deleteStudent = async (id: number) => {
+    if(confirm('Delete this student?')) { await supabase.from('students').delete().eq('id', id); fetchStudents(); }
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
+        <h2 className="text-lg font-bold mb-4 text-slate-800">Add New Student</h2>
+        <form onSubmit={addStudent} className="flex flex-col gap-3">
+          <input type="text" placeholder="Name (e.g. John)" required className="p-2 border rounded text-slate-800" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+          <input type="text" placeholder="Batch (e.g. HSC 2025)" className="p-2 border rounded text-slate-800" value={form.batch} onChange={e => setForm({...form, batch: e.target.value})} />
+          <input type="text" placeholder="Subject (e.g. Physics)" required className="p-2 border rounded text-slate-800" value={form.subject} onChange={e => setForm({...form, subject: e.target.value})} />
+          <input type="number" placeholder="Total Classes (e.g. 12)" className="p-2 border rounded text-slate-800" value={form.target} onChange={e => setForm({...form, target: e.target.value})} />
+          <button className="bg-green-600 text-white font-bold py-2 rounded hover:bg-green-700">Add Student</button>
+        </form>
+      </div>
+
+      <div className="md:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200">
+        <div className="p-4 border-b bg-slate-50"><h2 className="font-bold text-slate-700">Your Students ({students.length})</h2></div>
+        <div className="divide-y divide-slate-100">
+          {students.map(s => (
+            <div key={s.id} className="p-4 flex justify-between items-center hover:bg-slate-50 group">
+              <div>
+                <h3 className="font-bold text-slate-800 text-lg">{s.name}</h3>
+                <p className="text-sm text-slate-500">{s.subject} • {s.batch}</p>
+              </div>
+              <div className="text-right">
+                <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold">Target: {s.target_classes} Classes</span>
+                <button onClick={() => deleteStudent(s.id)} className="block ml-auto mt-2 text-xs text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100">Remove</button>
+              </div>
+            </div>
+          ))}
+          {students.length === 0 && <p className="p-8 text-center text-slate-400">No students added yet.</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- TAB 3: REPORTS & ANALYTICS ---
+function ReportsView({ session }: { session: any }) {
+  const [filterType, setFilterType] = useState('student') // student, batch, subject
+  const [filterValue, setFilterValue] = useState('')
+  const [lessons, setLessons] = useState<any[]>([])
+  const [options, setOptions] = useState<string[]>([])
+
+  // Load distinct options for the dropdown based on filterType
+  useEffect(() => {
+    const loadOptions = async () => {
+      // We fetch from 'students' table to get the list of names/batches/subjects
+      const { data } = await supabase.from('students').select('*').eq('user_id', session.user.id)
+      if (data) {
+        const unique = Array.from(new Set(data.map((item: any) => 
+          filterType === 'student' ? item.name : 
+          filterType === 'batch' ? item.batch : item.subject
+        ))).filter(Boolean) as string[]
+        setOptions(unique)
+        setFilterValue('')
+        setLessons([])
+      }
+    }
+    loadOptions()
+  }, [filterType])
+
+  // Fetch filtered lessons when user selects a value
+  useEffect(() => {
+    const fetchFiltered = async () => {
+      if (!filterValue) return
+      
+      let query = supabase.from('lessons').select('*').eq('user_id', session.user.id)
+      
+      if (filterType === 'student') query = query.eq('student_name', filterValue)
+      else if (filterType === 'batch') query = query.eq('batch', filterValue)
+      else if (filterType === 'subject') query = query.eq('subject', filterValue)
+      
+      const { data } = await query.order('lesson_date', { ascending: false })
+      if (data) setLessons(data)
+    }
+    fetchFiltered()
+  }, [filterValue])
+
+  return (
+    <div className="space-y-6">
+      {/* Filter Controls */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end">
+        <div>
+          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Filter By</label>
+          <div className="flex bg-slate-100 rounded-lg p-1">
+            {['student', 'batch', 'subject'].map(t => (
+              <button key={t} onClick={() => setFilterType(t)} 
+                className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize ${filterType === t ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Select {filterType}</label>
+          <select className="w-full p-2.5 border rounded-lg text-slate-800 bg-white" value={filterValue} onChange={e => setFilterValue(e.target.value)}>
+            <option value="">-- Select --</option>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Results */}
+      {filterValue && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
+            <h2 className="font-bold text-slate-700">Results for "{filterValue}"</h2>
+            <span className="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full">{lessons.length} Classes Found</span>
+          </div>
+          
+          <div className="divide-y divide-slate-100">
+            {lessons.length === 0 ? <p className="p-8 text-center text-slate-400">No records found.</p> : lessons.map(l => (
+              <div key={l.id} className="p-4 hover:bg-slate-50">
+                <div className="flex justify-between">
+                   <div className="font-bold text-slate-800">{l.lesson_topic}</div>
+                   <div className="text-sm text-slate-500">{l.lesson_date}</div>
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {filterType !== 'student' && <span className="mr-2">👤 {l.student_name}</span>}
+                  {filterType !== 'batch' && <span className="mr-2">🎓 {l.batch}</span>}
+                  {filterType !== 'subject' && <span>📚 {l.subject}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
