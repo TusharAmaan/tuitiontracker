@@ -92,14 +92,13 @@ function LoginScreen() {
   )
 }
 
-// --- NEW COMPONENT: Profile Modal ---
-function ProfileModal({ session, onClose }: any) {
+// --- PROFILE MODAL (UPDATED TO NOTIFY PARENT) ---
+function ProfileModal({ session, onClose, onUpdate }: any) {
   const [loading, setLoading] = useState(false)
   const [fullName, setFullName] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch Profile on Load
   useEffect(() => {
     const getProfile = async () => {
       setLoading(true)
@@ -113,30 +112,25 @@ function ProfileModal({ session, onClose }: any) {
     getProfile()
   }, [session])
 
-  // Handle Image Upload
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return
-    
     setLoading(true)
     const file = event.target.files[0]
     const fileExt = file.name.split('.').pop()
     const fileName = `${session.user.id}-${Math.random()}.${fileExt}`
     const filePath = `${fileName}`
 
-    // 1. Upload to Storage
     const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file)
     
     if (uploadError) {
       alert('Error uploading image: ' + uploadError.message)
     } else {
-      // 2. Get Public URL
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
       setAvatarUrl(data.publicUrl)
     }
     setLoading(false)
   }
 
-  // Handle Save
   const handleSave = async () => {
     setLoading(true)
     const { error } = await supabase.from('profiles').upsert({
@@ -146,8 +140,12 @@ function ProfileModal({ session, onClose }: any) {
       updated_at: new Date().toISOString()
     })
     
-    if (error) alert('Error saving profile: ' + error.message)
-    else onClose() // Close modal on success
+    if (error) {
+        alert('Error saving profile: ' + error.message)
+    } else {
+        onUpdate() // Refresh the parent name
+        onClose()
+    }
     setLoading(false)
   }
 
@@ -169,19 +167,10 @@ function ProfileModal({ session, onClose }: any) {
               </div>
             )}
           </div>
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="text-sm text-blue-600 font-bold hover:underline"
-          >
+          <button onClick={() => fileInputRef.current?.click()} className="text-sm text-blue-600 font-bold hover:underline">
             {loading ? 'Uploading...' : 'Change Photo'}
           </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            className="hidden" 
-            accept="image/*"
-            onChange={handleImageUpload}
-          />
+          <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
         </div>
 
         <div className="space-y-4">
@@ -192,20 +181,10 @@ function ProfileModal({ session, onClose }: any) {
           
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Full Name</label>
-            <input 
-              type="text" 
-              placeholder="e.g. Mr. Anderson"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full p-3 border rounded-lg text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" 
-            />
+            <input type="text" placeholder="e.g. Mr. Anderson" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full p-3 border rounded-lg text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" />
           </div>
 
-          <button 
-            onClick={handleSave} 
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg mt-2"
-          >
+          <button onClick={handleSave} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg mt-2">
             {loading ? 'Saving...' : 'Save Profile'}
           </button>
         </div>
@@ -214,24 +193,45 @@ function ProfileModal({ session, onClose }: any) {
   )
 }
 
-// --- APP SHELL ---
+// --- APP SHELL (UPDATED TO FETCH NAME) ---
 function AppShell({ session }: { session: any }) {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [showProfile, setShowProfile] = useState(false)
+  const [profileName, setProfileName] = useState('Profile') // Default to 'Profile'
+  const [avatar, setAvatar] = useState('')
+
+  // Fetch profile name on load
+  const fetchProfileName = async () => {
+    const { data } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', session.user.id).single()
+    if (data?.full_name) {
+      setProfileName(data.full_name)
+    }
+    if (data?.avatar_url) {
+      setAvatar(data.avatar_url)
+    }
+  }
+
+  useEffect(() => {
+    fetchProfileName()
+  }, [session])
 
   return (
     <main className="min-h-screen bg-slate-100 pb-20 md:pb-0 relative">
-      {/* HEADER */}
       <nav className="bg-white border-b px-4 py-3 sticky top-0 z-30 shadow-sm">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <h1 className="text-lg md:text-xl font-extrabold text-slate-800">TuitionTracker</h1>
           
           <div className="flex gap-4 items-center">
-            {/* PROFILE BUTTON */}
-            <button onClick={() => setShowProfile(true)} className="text-xs md:text-sm font-bold text-slate-600 hover:text-blue-600 flex items-center gap-1">
-              <span>👤</span> <span className="hidden md:inline">Profile</span>
+            {/* PROFILE BUTTON - SHOWS NAME NOW */}
+            <button onClick={() => setShowProfile(true)} className="text-xs md:text-sm font-bold text-slate-600 hover:text-blue-600 flex items-center gap-2">
+              {avatar ? (
+                 <img src={avatar} alt="User" className="w-6 h-6 rounded-full object-cover border border-slate-200" />
+              ) : (
+                 <span>👤</span> 
+              )}
+              <span className="hidden md:inline max-w-[100px] truncate">{profileName}</span>
             </button>
-            {/* SIGN OUT BUTTON */}
+            
             <button onClick={() => supabase.auth.signOut()} className="text-xs md:text-sm text-red-500 font-bold hover:text-red-700 border border-red-100 bg-red-50 px-3 py-1.5 rounded-full transition">
               Sign Out
             </button>
@@ -249,7 +249,7 @@ function AppShell({ session }: { session: any }) {
       </nav>
 
       {/* RENDER PROFILE MODAL */}
-      {showProfile && <ProfileModal session={session} onClose={() => setShowProfile(false)} />}
+      {showProfile && <ProfileModal session={session} onClose={() => setShowProfile(false)} onUpdate={fetchProfileName} />}
 
       <div className="max-w-6xl mx-auto p-4 md:p-8">
         {activeTab === 'dashboard' && <Dashboard session={session} />}
@@ -259,9 +259,6 @@ function AppShell({ session }: { session: any }) {
     </main>
   )
 }
-
-// --- (PREVIOUS COMPONENTS REMAIN UNCHANGED BELOW) ---
-// Note: To prevent errors, I am pasting the rest of the functions (Dashboard, StudentsManager, etc.) so the file is complete.
 
 function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel }: any) {
   return (
