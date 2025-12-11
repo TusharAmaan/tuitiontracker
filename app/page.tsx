@@ -16,16 +16,11 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 })
 
-// --- HELPER: Date Formatter ---
+// --- HELPERS ---
 const formatDate = (dateStr: string) => {
   if (!dateStr) return ''
   const date = new Date(dateStr)
-  return date.toLocaleDateString('en-US', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'short',  
-    day: 'numeric'   
-  })
+  return date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 const getCurrentMonthYear = () => {
@@ -37,6 +32,11 @@ const getMonthName = (monthNum: number) => {
   const date = new Date()
   date.setMonth(monthNum - 1)
   return date.toLocaleString('default', { month: 'long' })
+}
+
+// Format number as currency (Generic or BDT/USD)
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'BDT' }).format(amount).replace('BDT', '৳')
 }
 
 // --- MAIN CONTAINER ---
@@ -265,19 +265,18 @@ function AppShell({ session }: { session: any }) {
   )
 }
 
-// --- PAYMENTS VIEW (NEW) ---
+// --- PAYMENTS VIEW (UPDATED WITH REVENUE) ---
 function PaymentsView({ session }: { session: any }) {
   const [payments, setPayments] = useState<any[]>([])
-  const [filter, setFilter] = useState('this_month') // this_month, last_3, this_year, all
-  const [stats, setStats] = useState({ paid: 0, due: 0, rate: 0 })
+  const [filter, setFilter] = useState('this_month')
+  const [stats, setStats] = useState({ revenue: 0, potential: 0, count: 0 })
 
   useEffect(() => {
     const fetchPayments = async () => {
-      // 1. Fetch all payments (we filter in JS for flexibility)
-      // We also need student names, so we select nested data
+      // 1. Fetch payments with student fee details
       const { data, error } = await supabase
         .from('payments')
-        .select('*, students(name, batch)')
+        .select('*, students(name, batch, monthly_fee)')
         .eq('user_id', session.user.id)
         .order('payment_year', { ascending: false })
         .order('payment_month', { ascending: false })
@@ -290,35 +289,32 @@ function PaymentsView({ session }: { session: any }) {
       const currentYear = now.getFullYear()
 
       const filtered = data.filter((p: any) => {
-        if (filter === 'this_month') {
-          return p.payment_month === currentMonth && p.payment_year === currentYear
-        }
-        if (filter === 'this_year') {
-          return p.payment_year === currentYear
-        }
+        if (filter === 'this_month') return p.payment_month === currentMonth && p.payment_year === currentYear
+        if (filter === 'this_year') return p.payment_year === currentYear
         if (filter === 'last_3') {
-          // Simple logic: convert to total months value (year * 12 + month)
           const pVal = p.payment_year * 12 + p.payment_month
           const nowVal = currentYear * 12 + currentMonth
           return (nowVal - pVal) >= 0 && (nowVal - pVal) < 3
         }
-        if (filter === 'last_6') {
-          const pVal = p.payment_year * 12 + p.payment_month
-          const nowVal = currentYear * 12 + currentMonth
-          return (nowVal - pVal) >= 0 && (nowVal - pVal) < 6
-        }
-        return true // 'all'
+        return true
       })
 
       setPayments(filtered)
 
-      // 3. Calculate Stats
-      const paidCount = filtered.filter((p: any) => p.status === 'paid').length
-      const dueCount = filtered.filter((p: any) => p.status === 'due').length
-      const total = paidCount + dueCount
-      const rate = total > 0 ? Math.round((paidCount / total) * 100) : 0
+      // 3. Calculate Financials
+      // Total Paid Revenue
+      const revenue = filtered
+        .filter((p: any) => p.status === 'paid')
+        .reduce((sum: number, p: any) => sum + (p.students?.monthly_fee || 0), 0)
 
-      setStats({ paid: paidCount, due: dueCount, rate })
+      // Total Pending (Potential Revenue)
+      const potential = filtered
+        .filter((p: any) => p.status === 'due')
+        .reduce((sum: number, p: any) => sum + (p.students?.monthly_fee || 0), 0)
+
+      const count = filtered.filter((p: any) => p.status === 'paid').length
+
+      setStats({ revenue, potential, count })
     }
 
     fetchPayments()
@@ -326,67 +322,59 @@ function PaymentsView({ session }: { session: any }) {
 
   return (
     <div className="space-y-6">
-      {/* FILTER BAR */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-2 items-center">
         <span className="text-xs font-bold text-slate-500 uppercase mr-2">Time Range:</span>
-        {['this_month', 'last_3', 'last_6', 'this_year', 'all'].map(f => (
-          <button 
-            key={f} 
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-full text-sm font-bold capitalize transition ${filter === f ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-          >
-            {f.replace('_', ' ')}
-          </button>
+        {['this_month', 'last_3', 'this_year', 'all'].map(f => (
+          <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-full text-sm font-bold capitalize transition ${filter === f ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{f.replace('_', ' ')}</button>
         ))}
       </div>
 
-      {/* SUMMARY CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* TOTAL REVENUE CARD */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-green-100 bg-gradient-to-br from-white to-green-50">
-          <h3 className="text-xs font-bold text-green-600 uppercase mb-1">Total Paid</h3>
-          <p className="text-3xl font-extrabold text-green-700">{stats.paid}</p>
+          <h3 className="text-xs font-bold text-green-600 uppercase mb-1">Total Revenue</h3>
+          <p className="text-3xl font-extrabold text-green-700">{formatCurrency(stats.revenue)}</p>
+          <p className="text-xs text-green-600 mt-1">{stats.count} payments collected</p>
         </div>
+        {/* PENDING CARD */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-red-100 bg-gradient-to-br from-white to-red-50">
           <h3 className="text-xs font-bold text-red-600 uppercase mb-1">Pending Dues</h3>
-          <p className="text-3xl font-extrabold text-red-700">{stats.due}</p>
+          <p className="text-3xl font-extrabold text-red-700">{formatCurrency(stats.potential)}</p>
+          <p className="text-xs text-red-600 mt-1">Expected income</p>
         </div>
+        {/* INFO CARD */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-100 bg-gradient-to-br from-white to-blue-50">
-          <h3 className="text-xs font-bold text-blue-600 uppercase mb-1">Collection Rate</h3>
-          <p className="text-3xl font-extrabold text-blue-700">{stats.rate}%</p>
+          <h3 className="text-xs font-bold text-blue-600 uppercase mb-1">Status</h3>
+          <p className="text-sm font-medium text-slate-700">
+            {filter === 'this_month' ? 'Showing payments for the current month.' : 'Showing historical payment data.'}
+          </p>
         </div>
       </div>
 
-      {/* DETAILED LIST */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="p-4 border-b bg-slate-50">
-          <h2 className="font-bold text-slate-700">Payment History ({payments.length})</h2>
-        </div>
+        <div className="p-4 border-b bg-slate-50"><h2 className="font-bold text-slate-700">Payment History ({payments.length})</h2></div>
         <div className="divide-y divide-slate-100">
-          {payments.length === 0 ? (
-            <p className="p-8 text-center text-slate-400">No payment records found for this period.</p>
-          ) : (
-            payments.map((p) => (
-              <div key={p.id} className="p-4 flex justify-between items-center hover:bg-slate-50">
-                <div>
-                  <div className="font-bold text-slate-800">{p.students?.name || 'Unknown Student'}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">
-                    {getMonthName(p.payment_month)} {p.payment_year} • {p.students?.batch}
-                  </div>
-                </div>
-                <div>
-                  {p.status === 'paid' ? (
-                    <span className="px-3 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold border border-green-200">
-                      Paid
-                    </span>
-                  ) : (
-                    <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold border border-red-200">
-                      Due
-                    </span>
-                  )}
-                </div>
+          {payments.length === 0 ? <p className="p-8 text-center text-slate-400">No payment records found for this period.</p> : payments.map((p) => (
+            <div key={p.id} className="p-4 flex justify-between items-center hover:bg-slate-50">
+              <div>
+                <div className="font-bold text-slate-800">{p.students?.name || 'Unknown Student'}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{getMonthName(p.payment_month)} {p.payment_year} • {p.students?.batch}</div>
               </div>
-            ))
-          )}
+              <div className="text-right">
+                {p.status === 'paid' ? (
+                  <>
+                    <span className="block font-bold text-green-700 text-sm">{formatCurrency(p.students?.monthly_fee || 0)}</span>
+                    <span className="inline-block px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-bold uppercase">Paid</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="block font-bold text-red-700 text-sm">{formatCurrency(p.students?.monthly_fee || 0)}</span>
+                    <span className="inline-block px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold uppercase">Due</span>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -554,7 +542,7 @@ function Dashboard({ session }: { session: any }) {
         {lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No lessons yet.</p> : lessons.map((l) => (
           <div key={l.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-200 ${editingId === l.id ? 'ring-2 ring-orange-400' : ''}`}>
             <div className="flex justify-between items-start mb-3">
-              <div><div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-bold text-lg text-slate-800">{l.student_name}</span><span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md border font-medium">{l.subject}</span>{l.class_serial && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}</div><div className="text-xs text-slate-400">{l.batch}</div></div><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{formatDate(l.lesson_date)}</span>
+              <div><div className="flex flex-wrap items-center gap-2 mb-1"><span className="font-bold text-lg text-slate-800">{l.student_name}</span><span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md border font-medium">{l.subject}</span>{l.class_serial && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}</div><div className="text-xs text-slate-400">{l.batch}</div></div><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{formatDate(l.lesson_date)}</span>
             </div>
             <p className="text-slate-700 text-sm mb-4 whitespace-pre-wrap leading-relaxed">{l.lesson_topic}</p>
             <div className="flex gap-3 border-t pt-3 mt-2"><button onClick={() => handleEdit(l)} className="flex-1 py-2 text-xs font-bold text-orange-600 bg-orange-50 rounded hover:bg-orange-100">Edit</button><button onClick={() => handleDelete(l.id)} className="flex-1 py-2 text-xs font-bold text-red-600 bg-red-50 rounded hover:bg-red-100">Delete</button></div>
@@ -626,10 +614,10 @@ function SubjectSelector({ session, selectedSubjects, onChange }: any) {
   )
 }
 
-// --- STUDENTS MANAGER ---
+// --- STUDENTS MANAGER (UPDATED FOR FEE) ---
 function StudentsManager({ session }: { session: any }) {
   const [students, setStudents] = useState<any[]>([])
-  const [form, setForm] = useState({ name: '', batch: '', subjects: [] as string[], target: '' })
+  const [form, setForm] = useState({ name: '', batch: '', subjects: [] as string[], target: '', fee: '' })
   const [editingId, setEditingId] = useState<number | null>(null)
 
   const fetchStudents = async () => {
@@ -648,9 +636,9 @@ function StudentsManager({ session }: { session: any }) {
 
   useEffect(() => { fetchStudents() }, [])
 
-  const handleEdit = (s: any) => { setEditingId(s.id); setForm({ name: s.name, batch: s.batch, subjects: s.subjects || [], target: s.target_classes }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-  const handleCancel = () => { setEditingId(null); setForm({ name: '', batch: '', subjects: [], target: '' }); }
-  const handleSave = async (e: React.FormEvent) => { e.preventDefault(); const payload = { user_id: session.user.id, name: form.name, batch: form.batch, subject: JSON.stringify(form.subjects), target_classes: parseInt(form.target) || 0 }; let error; if (editingId) { const { error: err } = await supabase.from('students').update(payload).eq('id', editingId); error = err } else { const { error: err } = await supabase.from('students').insert([payload]); error = err }; if(!error) { handleCancel(); fetchStudents(); } else { alert(error.message) } }
+  const handleEdit = (s: any) => { setEditingId(s.id); setForm({ name: s.name, batch: s.batch, subjects: s.subjects || [], target: s.target_classes, fee: s.monthly_fee || '' }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  const handleCancel = () => { setEditingId(null); setForm({ name: '', batch: '', subjects: [], target: '', fee: '' }); }
+  const handleSave = async (e: React.FormEvent) => { e.preventDefault(); const payload = { user_id: session.user.id, name: form.name, batch: form.batch, subject: JSON.stringify(form.subjects), target_classes: parseInt(form.target) || 0, monthly_fee: parseInt(form.fee) || 0 }; let error; if (editingId) { const { error: err } = await supabase.from('students').update(payload).eq('id', editingId); error = err } else { const { error: err } = await supabase.from('students').insert([payload]); error = err }; if(!error) { handleCancel(); fetchStudents(); } else { alert(error.message) } }
   
   const handleDelete = async (id: number) => { 
     if(!confirm('Delete this student?')) return;
@@ -667,11 +655,25 @@ function StudentsManager({ session }: { session: any }) {
           <input type="text" placeholder="Name" required className="p-3 border rounded-lg text-base text-slate-800" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
           <input type="text" placeholder="Batch" className="p-3 border rounded-lg text-base text-slate-800" value={form.batch} onChange={e => setForm({...form, batch: e.target.value})} />
           <SubjectSelector session={session} selectedSubjects={form.subjects} onChange={(newSubs: string[]) => setForm({...form, subjects: newSubs})} />
-          <input type="number" placeholder="Class Target" className="p-3 border rounded-lg text-base text-slate-800" value={form.target} onChange={e => setForm({...form, target: e.target.value})} />
+          
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Target Classes</label>
+              <input type="number" placeholder="12" className="w-full p-3 border rounded-lg text-base text-slate-800" value={form.target} onChange={e => setForm({...form, target: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Monthly Fee</label>
+              <input type="number" placeholder="2000" className="w-full p-3 border rounded-lg text-base text-slate-800" value={form.fee} onChange={e => setForm({...form, fee: e.target.value})} />
+            </div>
+          </div>
+
           <button className={`w-full text-white font-bold py-3 rounded-lg transition shadow-sm ${editingId ? 'bg-orange-500' : 'bg-green-600'}`}>{editingId ? 'Update Student' : 'Add Student'}</button>
         </form>
       </div>
-      <div className="md:col-span-2 space-y-4"><h2 className="font-bold text-slate-700 px-2">Your Students</h2>{students.map(s => (
+      
+      <div className="md:col-span-2 space-y-4">
+        <h2 className="font-bold text-slate-700 px-2">Your Students</h2>
+        {students.map(s => (
           <div key={s.id} className={`bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-3 ${editingId === s.id ? 'ring-2 ring-orange-400' : ''}`}>
             <div className="flex justify-between items-start">
                 <div>
@@ -685,11 +687,16 @@ function StudentsManager({ session }: { session: any }) {
                         {s.subjects && s.subjects.map((sub: string) => (<span key={sub} className="bg-slate-100 px-2 py-0.5 rounded text-xs border">{sub}</span>))}
                     </div>
                 </div>
-                <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold">Target: {s.target_classes}</span>
+                <div className="text-right">
+                  <span className="block text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold mb-1">Target: {s.target_classes}</span>
+                  {s.monthly_fee > 0 && <span className="block text-xs font-bold text-slate-400">{formatCurrency(s.monthly_fee)}/mo</span>}
+                </div>
             </div>
             <div className="flex gap-3 border-t pt-3"><button onClick={() => handleEdit(s)} className="flex-1 py-2 text-xs font-bold text-orange-600 bg-orange-50 rounded hover:bg-orange-100">Edit</button><button onClick={() => handleDelete(s.id)} className="flex-1 py-2 text-xs font-bold text-red-600 bg-red-50 rounded hover:bg-red-100">Delete</button></div>
           </div>
-        ))}{students.length === 0 && <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No students yet.</p>}</div>
+        ))}
+        {students.length === 0 && <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No students yet.</p>}
+      </div>
     </div>
   )
 }
@@ -701,6 +708,6 @@ function ReportsView({ session }: { session: any }) {
   useEffect(() => { const loadL = async () => { if (!filterValue) return; let q = supabase.from('lessons').select('*').eq('user_id', session.user.id); if (filterType === 'student') q = q.eq('student_name', filterValue); else if (filterType === 'batch') q = q.eq('batch', filterValue); else if (filterType === 'subject') q = q.eq('subject', filterValue); const { data } = await q.order('lesson_date', { ascending: false }); if (data) setLessons(data); }; loadL(); }, [filterValue])
   return (
     <div className="space-y-6"><div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200"><label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Filter By</label><div className="flex bg-slate-100 rounded-lg p-1 mb-4 overflow-x-auto">{['student', 'batch', 'subject'].map(t => <button key={t} onClick={() => setFilterType(t)} className={`flex-1 px-3 py-2 rounded-md text-sm font-bold capitalize whitespace-nowrap ${filterType === t ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>{t}</button>)}</div><label className="block text-xs font-bold text-slate-500 mb-2 uppercase">Select {filterType}</label><select className="w-full p-3 border rounded-lg text-base text-slate-800 bg-white" value={filterValue} onChange={e => setFilterValue(e.target.value)}><option value="">-- Select --</option>{options.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-      {filterValue && (<div className="space-y-4"><div className="flex justify-between items-center px-2"><h2 className="font-bold text-slate-700">Results: "{filterValue}"</h2><span className="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full">{lessons.length}</span></div>{lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No records.</p> : lessons.map(l => (<div key={l.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{formatDate(l.lesson_date)}</span>{l.class_serial && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-md border border-blue-200 font-bold">Class #{l.class_serial}</span>}</div><div className="font-bold text-slate-800 mb-2">{l.lesson_topic}</div><div className="text-xs text-slate-500 flex gap-2">{filterType !== 'student' && <span className="bg-slate-100 px-2 py-1 rounded">👤 {l.student_name}</span>}{filterType !== 'batch' && <span className="bg-slate-100 px-2 py-1 rounded">🎓 {l.batch}</span>}{filterType !== 'subject' && <span className="bg-slate-100 px-2 py-1 rounded">📚 {l.subject}</span>}</div></div>))}</div>)}</div>
+      {filterValue && (<div className="space-y-4"><div className="flex justify-between items-center px-2"><h2 className="font-bold text-slate-700">Results: "{filterValue}"</h2><span className="bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-full">{lessons.length}</span></div>{lessons.length === 0 ? <p className="p-8 text-center text-slate-400 bg-white rounded-xl border">No records.</p> : lessons.map(l => (<div key={l.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded">{formatDate(l.lesson_date)}</span>{l.class_serial && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}</div><div className="font-bold text-slate-800 mb-2">{l.lesson_topic}</div><div className="text-xs text-slate-500 flex gap-2">{filterType !== 'student' && <span className="bg-slate-100 px-2 py-1 rounded">👤 {l.student_name}</span>}{filterType !== 'batch' && <span className="bg-slate-100 px-2 py-1 rounded">🎓 {l.batch}</span>}{filterType !== 'subject' && <span className="bg-slate-100 px-2 py-1 rounded">📚 {l.subject}</span>}</div></div>))}</div>)}</div>
   )
 }
