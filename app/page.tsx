@@ -2,71 +2,132 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
-// --- Config ---
+// --- 1. CONFIGURATION WITH PERSISTENCE ---
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-const supabase = createClient(supabaseUrl, supabaseKey)
 
+// We explicitly tell Supabase to use LocalStorage and Keep the session
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storageKey: 'tuition-tracker-session',
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined
+  }
+})
+
+// --- 2. MAIN APP CONTAINER ---
 export default function Home() {
   const [session, setSession] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Check for existing session immediately on load
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session) setSession(session)
+      } catch (error) {
+        console.error('Session check error', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    checkSession()
+
+    // Listen for background changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      setLoading(false)
+      if (session) setLoading(false)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session))
+
     return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) return <div className="p-10 text-center text-slate-500">Loading TuitionTracker...</div>
+  // Loading Screen
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center animate-pulse">
+          <div className="text-xl font-bold text-slate-400">Restoring Session...</div>
+        </div>
+      </div>
+    )
+  }
+
   return session ? <AppShell session={session} /> : <LoginScreen />
 }
 
-// --- LOGIN SCREEN ---
+// --- 3. LOGIN SCREEN ---
 function LoginScreen() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
+  const [sent, setSent] = useState(false)
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    const { error } = await supabase.auth.signInWithOtp({ email })
+    const { error } = await supabase.auth.signInWithOtp({ 
+      email,
+      options: { emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined }
+    })
+    
     if (error) alert(error.message)
-    else alert('Check your email for the login link!')
+    else setSent(true)
     setLoading(false)
   }
 
-  const handleGoogle = async () => supabase.auth.signInWithOAuth({ provider: 'google' })
+  const handleGoogle = async () => supabase.auth.signInWithOAuth({ 
+    provider: 'google',
+    options: { redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined }
+  })
+
+  if (sent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border border-slate-200">
+          <h2 className="text-2xl font-bold text-green-600 mb-2">Check your Email!</h2>
+          <p className="text-slate-600">We sent a magic link to <b>{email}</b>.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
       <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border border-slate-200">
         <h1 className="text-3xl font-extrabold text-slate-800 mb-2">TuitionTracker</h1>
-        <p className="text-slate-500 mb-8">Manage your students and lessons.</p>
+        <p className="text-slate-500 mb-8">Sign in once, stay logged in.</p>
+        
         <form onSubmit={handleLogin} className="space-y-4 mb-6">
           <input type="email" placeholder="Enter your email" required 
             className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
             value={email} onChange={e => setEmail(e.target.value)} />
-          <button disabled={loading} className="w-full bg-blue-600 text-white font-bold p-3 rounded-lg hover:bg-blue-700">
-            {loading ? 'Sending...' : 'Sign in with Email'}
+          <button disabled={loading} className="w-full bg-blue-600 text-white font-bold p-3 rounded-lg hover:bg-blue-700 transition-all">
+            {loading ? 'Sending Link...' : 'Sign in with Email'}
           </button>
         </form>
-        <div className="relative mb-6"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div><div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-slate-500">Or continue with</span></div></div>
-        <button onClick={handleGoogle} className="w-full border bg-white text-slate-700 font-bold p-3 rounded-lg hover:bg-slate-50">Google</button>
+
+        <div className="relative mb-6">
+          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+          <div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-slate-500">Or</span></div>
+        </div>
+        
+        <button onClick={handleGoogle} className="w-full border bg-white text-slate-700 font-bold p-3 rounded-lg hover:bg-slate-50 flex items-center justify-center gap-2 transition-all">
+          <span className="text-lg">G</span> Sign in with Google
+        </button>
       </div>
     </div>
   )
 }
 
-// --- MAIN APP SHELL ---
+// --- 4. APP SHELL (NAVIGATION TABS) ---
 function AppShell({ session }: { session: any }) {
   const [activeTab, setActiveTab] = useState('dashboard')
 
   return (
     <main className="min-h-screen bg-slate-100">
-      {/* Header */}
       <nav className="bg-white border-b border-slate-200 px-4 py-3 flex justify-between items-center sticky top-0 z-10">
         <h1 className="text-xl font-extrabold text-slate-800">TuitionTracker</h1>
         <div className="flex gap-2">
@@ -89,47 +150,38 @@ function AppShell({ session }: { session: any }) {
   )
 }
 
-// --- TAB 1: DASHBOARD ---
+// --- 5. DASHBOARD TAB ---
 function Dashboard({ session }: { session: any }) {
   const [lessons, setLessons] = useState<any[]>([])
   const [students, setStudents] = useState<any[]>([])
   const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], studentId: '', topic: '' })
   const [loading, setLoading] = useState(false)
 
-  // Fetch Data
   const fetchData = async () => {
-    const { data: lData } = await supabase.from('lessons').select('*').eq('user_id', session.user.id).order('id', { ascending: false }).limit(10)
+    const { data: lData } = await supabase.from('lessons').select('*').eq('user_id', session.user.id).order('id', { ascending: false }).limit(20)
     const { data: sData } = await supabase.from('students').select('*').eq('user_id', session.user.id)
     if (lData) setLessons(lData)
     if (sData) setStudents(sData)
   }
   useEffect(() => { fetchData() }, [])
 
-  // Handle Add Lesson
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    
-    // Find selected student details to auto-fill
     const selectedStudent = students.find(s => s.id.toString() === formData.studentId)
     if (!selectedStudent) { alert('Please select a student'); setLoading(false); return; }
 
     const { error } = await supabase.from('lessons').insert([{
       user_id: session.user.id,
       student_name: selectedStudent.name,
-      class_no: selectedStudent.class_no || 'N/A', // Assuming you might add class_no to student table later or just omit
+      class_no: 'N/A', // Simplified for now
       batch: selectedStudent.batch,
       subject: selectedStudent.subject,
       lesson_topic: formData.topic,
       lesson_date: formData.date
     }])
-
-    if (!error) {
-      setFormData({ ...formData, topic: '' })
-      fetchData()
-    } else {
-      alert('Error: ' + error.message)
-    }
+    if (!error) { setFormData({ ...formData, topic: '' }); fetchData(); }
+    else { alert('Error: ' + error.message) }
     setLoading(false)
   }
 
@@ -139,7 +191,6 @@ function Dashboard({ session }: { session: any }) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      {/* ADD LESSON CARD */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
         <h2 className="text-lg font-bold mb-4 text-slate-800">New Lesson Entry</h2>
         {students.length === 0 ? (
@@ -167,7 +218,6 @@ function Dashboard({ session }: { session: any }) {
         )}
       </div>
 
-      {/* RECENT HISTORY */}
       <div className="md:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 border-b bg-slate-50"><h2 className="font-bold text-slate-700">Recent Activity</h2></div>
         <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
@@ -193,7 +243,7 @@ function Dashboard({ session }: { session: any }) {
   )
 }
 
-// --- TAB 2: STUDENTS MANAGER ---
+// --- 6. STUDENTS TAB ---
 function StudentsManager({ session }: { session: any }) {
   const [students, setStudents] = useState<any[]>([])
   const [form, setForm] = useState({ name: '', batch: '', subject: '', target: '' })
@@ -255,7 +305,7 @@ function StudentsManager({ session }: { session: any }) {
   )
 }
 
-// --- TAB 3: REPORTS & ANALYTICS ---
+// --- 7. REPORTS TAB ---
 function ReportsView({ session }: { session: any }) {
   const [filterType, setFilterType] = useState('student') // student, batch, subject
   const [filterValue, setFilterValue] = useState('')
