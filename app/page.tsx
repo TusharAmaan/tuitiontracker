@@ -426,6 +426,7 @@ function Dashboard({ session }: { session: any }) {
 }
 
 // --- STUDENTS MANAGER ---
+// --- STUDENTS MANAGER ---
 function StudentsManager({ session }: { session: any }) {
   const [students, setStudents] = useState<any[]>([])
   const [form, setForm] = useState({ name: '', batch: '', subject: '', target: '' })
@@ -448,13 +449,46 @@ function StudentsManager({ session }: { session: any }) {
 
   const handleEdit = (s: any) => { setEditingId(s.id); setForm({ name: s.name, batch: s.batch, subject: s.subject, target: s.target_classes }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   const handleCancel = () => { setEditingId(null); setForm({ name: '', batch: '', subject: '', target: '' }); }
-  const handleSave = async (e: React.FormEvent) => { e.preventDefault(); const payload = { user_id: session.user.id, name: form.name, batch: form.batch, subject: form.subject, target_classes: parseInt(form.target) || 0 }; let error; if (editingId) { const { error: err } = await supabase.from('students').update(payload).eq('id', editingId); error = err } else { const { error: err } = await supabase.from('students').insert([payload]); error = err }; if(!error) { handleCancel(); fetchStudents(); } else { alert(error.message) } }
-  const handleDelete = async (id: number) => { if(confirm('Delete student?')) { await supabase.from('students').delete().eq('id', id); fetchStudents(); }}
+  
+  const handleSave = async (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    const payload = { user_id: session.user.id, name: form.name, batch: form.batch, subject: form.subject, target_classes: parseInt(form.target) || 0 }; 
+    let error; 
+    if (editingId) { 
+        const { error: err } = await supabase.from('students').update(payload).eq('id', editingId); 
+        error = err 
+    } else { 
+        const { error: err } = await supabase.from('students').insert([payload]); 
+        error = err 
+    }; 
+    if(!error) { handleCancel(); fetchStudents(); } else { alert(error.message) } 
+  }
+
+  // --- UPDATED DELETE FUNCTION ---
+  const handleDelete = async (id: number) => { 
+    if(!confirm('Delete this student? This will also remove their payment history.')) return;
+
+    // 1. Delete associated payments first (This unblocks the student delete)
+    const { error: payError } = await supabase.from('payments').delete().eq('student_id', id);
+    if (payError) {
+        alert("Error deleting payments: " + payError.message);
+        return;
+    }
+
+    // 2. Now delete the student
+    const { error } = await supabase.from('students').delete().eq('id', id); 
+    
+    if (error) {
+        alert("Error deleting student: " + error.message);
+    } else {
+        fetchStudents(); 
+    }
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit md:sticky md:top-24 z-10">
-        <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Student' : 'Add Student'}</h2>{editingId && <button onClick={handleCancel} className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded font-bold">Cancel</button>}</div>
+        <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Student' : 'Add Student'}</h2>{editingId && <button onClick={handleCancel} className="text-xs text-red-500 font-bold bg-red-50 px-2 py-1 rounded font-bold">Cancel</button>}</div>
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           <input type="text" placeholder="Name" required className="p-3 border rounded-lg text-base text-slate-800" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
           <input type="text" placeholder="Batch" className="p-3 border rounded-lg text-base text-slate-800" value={form.batch} onChange={e => setForm({...form, batch: e.target.value})} />
