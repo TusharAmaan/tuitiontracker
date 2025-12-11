@@ -82,7 +82,7 @@ function LoginScreen() {
         <h1 className="text-3xl font-extrabold text-slate-800 mb-2">TuitionTracker</h1>
         <p className="text-slate-500 mb-6">Sign in to manage lessons.</p>
         <form onSubmit={handleLogin} className="space-y-4 mb-6">
-          <input type="email" placeholder="Enter email" required className="w-full p-3 border rounded text-base text-slate-800" value={email} onChange={e => setEmail(e.target.value)} />
+          <input type="email" placeholder="Enter email" required className="w-full p-3 border rounded-lg text-base text-slate-800" value={email} onChange={e => setEmail(e.target.value)} />
           <button disabled={loading} className="w-full bg-blue-600 text-white font-bold p-3 rounded hover:bg-blue-700">{loading ? 'Sending...' : 'Sign in with Email'}</button>
         </form>
         <div className="border-t border-slate-200 pt-4">
@@ -153,7 +153,6 @@ function PaymentModal({ studentName, target, currentSerial, onConfirm, onCancel 
 function Dashboard({ session }: { session: any }) {
   const [lessons, setLessons] = useState<any[]>([])
   const [students, setStudents] = useState<any[]>([])
-  // Added 'serial' to formData
   const [formData, setFormData] = useState({ date: new Date().toISOString().split('T')[0], studentId: '', topic: '', serial: '' })
   const [editingId, setEditingId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -174,7 +173,6 @@ function Dashboard({ session }: { session: any }) {
   const handleEdit = (lesson: any) => {
     setEditingId(lesson.id)
     const student = students.find(s => s.name === lesson.student_name)
-    // Load serial into form if editing
     setFormData({ date: lesson.lesson_date, studentId: student ? student.id.toString() : '', topic: lesson.lesson_topic, serial: lesson.class_serial || '' })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -184,7 +182,32 @@ function Dashboard({ session }: { session: any }) {
     setFormData({ date: new Date().toISOString().split('T')[0], studentId: '', topic: '', serial: '' })
   }
 
-  // --- THE NEW LOGIC FLOW ---
+  const handleDelete = async (id: number) => {
+    if(confirm('Delete this lesson permanently?')) { await supabase.from('lessons').delete().eq('id', id); fetchData(); }
+  }
+
+  // Helper: Just save the lesson
+  const saveLessonOnly = async (payload: any) => {
+    let error
+    if (editingId) {
+       const { error: err } = await supabase.from('lessons').update(payload).eq('id', editingId)
+       error = err
+    } else {
+       const { error: err } = await supabase.from('lessons').insert([payload])
+       error = err
+    }
+    finalizeSubmission(error)
+  }
+
+  // Helper: Clean up after submission
+  const finalizeSubmission = (error: any) => {
+    if (!error) { handleCancel(); fetchData(); } 
+    else { alert('Error saving lesson: ' + error.message) }
+    setLoading(false)
+    setTempLessonData(null)
+    setModalStudentInfo(null)
+  }
+
   // 1. Intercept Form Submit
   const handleInitialSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -204,7 +227,7 @@ function Dashboard({ session }: { session: any }) {
       subject: selectedStudent.subject,
       lesson_topic: formData.topic,
       lesson_date: formData.date,
-      class_serial: currentSerial // Save serial
+      class_serial: currentSerial
     }
 
     // CHECK CONDITION: If not editing AND serial matches target -> Show Pop-up
@@ -216,21 +239,8 @@ function Dashboard({ session }: { session: any }) {
         return // Stop here, wait for modal interaction
     }
 
-    // Otherwise, proceed normally (saving lesson only)
-    await saveLesson Only(lessonPayload)
-  }
-
-  // Helper: Just save the lesson (used for normal submission or editing)
-  const saveLessonOnly = async (payload: any) => {
-    let error
-    if (editingId) {
-       const { error: err } = await supabase.from('lessons').update(payload).eq('id', editingId)
-       error = err
-    } else {
-       const { error: err } = await supabase.from('lessons').insert([payload])
-       error = err
-    }
-    finalizeSubmission(error)
+    // Otherwise, proceed normally
+    await saveLessonOnly(lessonPayload) // FIXED LINE
   }
 
   // 2. Handle Modal Selection (Paid vs Due)
@@ -240,14 +250,13 @@ function Dashboard({ session }: { session: any }) {
 
       const { month, year } = getCurrentMonthYear()
 
-      // Save Payment Status
       const { error: paymentError } = await supabase.from('payments').upsert({
           user_id: session.user.id,
           student_id: modalStudentInfo.studentId,
           payment_month: month,
           payment_year: year,
           status: status
-      }, { onConflict: 'student_id, payment_month, payment_year' }) // Update if exists for this month
+      }, { onConflict: 'student_id, payment_month, payment_year' })
 
       if(paymentError) {
         alert('Error saving payment status: ' + paymentError.message)
@@ -255,20 +264,9 @@ function Dashboard({ session }: { session: any }) {
         return
       }
 
-      // If payment saved successfully, now save the lesson
       const { error: lessonError } = await supabase.from('lessons').insert([tempLessonData])
       finalizeSubmission(lessonError)
   }
-
-  // Helper: Clean up after submission
-  const finalizeSubmission = (error: any) => {
-    if (!error) { handleCancel(); fetchData(); } 
-    else { alert('Error saving lesson: ' + error.message) }
-    setLoading(false)
-    setTempLessonData(null)
-    setModalStudentInfo(null)
-  }
-
 
   return (
     <>
@@ -293,7 +291,6 @@ function Dashboard({ session }: { session: any }) {
         {students.length === 0 ? (
            <div className="text-center p-4 bg-yellow-50 text-yellow-800 rounded-lg text-sm">⚠ Add Students first!</div>
         ) : (
-          // Changed onSubmit handler
           <form onSubmit={handleInitialSubmit} className="flex flex-col gap-3">
             <input type="date" required className="p-3 border rounded-lg text-base text-slate-800 bg-white" 
               value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
@@ -301,11 +298,9 @@ function Dashboard({ session }: { session: any }) {
             <select required className="p-3 border rounded-lg text-base text-slate-800 bg-white"
               value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})}>
               <option value="">Select Student...</option>
-              {/* Show Target in dropdown for clarity */}
               {students.map(s => <option key={s.id} value={s.id}>{s.name} (Target: {s.target_classes})</option>)}
             </select>
             
-            {/* NEW INPUT: Class Serial No. */}
             <input type="number" required placeholder="Class Serial No. (e.g. 12)" className="p-3 border rounded-lg text-base text-slate-800 bg-white"
               value={formData.serial} onChange={e => setFormData({...formData, serial: e.target.value})} />
 
@@ -328,7 +323,6 @@ function Dashboard({ session }: { session: any }) {
                 <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="font-bold text-lg text-slate-800">{l.student_name}</span>
                   <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md border font-medium">{l.subject}</span>
-                  {/* Display Class Serial */}
                   {l.class_serial && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-md border border-blue-100 font-bold">Class #{l.class_serial}</span>}
                 </div>
                 <div className="text-xs text-slate-400">{l.batch}</div>
